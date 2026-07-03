@@ -1,0 +1,139 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+
+	<!-- Main HUD frame. Moveable; the engine + events live on a Lua-created frame
+	     in Core (so the event hub works regardless of XML load order), this is
+	     just the visible display. Contents (consumable/repair status rows) are
+	     built in Lua. Hidden until there is something to show. -->
+	<Frame name="Quartermaster_Main" parent="UIParent" movable="true" enableMouse="true" hidden="true">
+		<Size>
+			<AbsDimension x="220" y="100" />
+		</Size>
+		<Anchors>
+			<Anchor point="CENTER" />
+		</Anchors>
+		<Layers>
+			<Layer level="OVERLAY">
+				<FontString name="$parentTitle" inherits="GameFontNormalSmall" text="Quartermaster">
+					<Anchors>
+						<Anchor point="TOP">
+							<Offset>
+								<AbsDimension x="0" y="-5" />
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+			<OnLoad>
+				Quartermaster_Main_OnLoad()
+			</OnLoad>
+			<OnDragStart>
+				Quartermaster_FrameDragStart()
+			</OnDragStart>
+			<OnDragStop>
+				Quartermaster_FrameDragStop()
+			</OnDragStop>
+		</Scripts>
+	</Frame>
+
+	<!-- Central notification area. A moveable/anchorable floating message strip;
+	     transient lines (low repair, low/expiring/lost consumables, ...) stack and
+	     fade. Has NO resize grip; its "size" is the notification font size
+	     (options.notify.fontSize). Shown for its whole life: a faint grab box +
+	     $parentHandle label while unlocked so it can be placed, fully transparent
+	     once locked (see Notify.lua onLock). Lines are font strings built in Lua. -->
+	<Frame name="Quartermaster_Notify" parent="UIParent" movable="true" enableMouse="true">
+		<Size>
+			<AbsDimension x="240" y="40" />
+		</Size>
+		<Anchors>
+			<Anchor point="CENTER">
+				<Offset>
+					<AbsDimension x="0" y="150" />
+				</Offset>
+			</Anchor>
+		</Anchors>
+		<Layers>
+			<Layer level="OVERLAY">
+				<FontString name="$parentHandle" inherits="GameFontNormalSmall" text="Quartermaster notifications">
+					<Anchors>
+						<Anchor point="TOP">
+							<Offset>
+								<AbsDimension x="0" y="-4" />
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+			<OnLoad>
+				Quartermaster_Notify_OnLoad()
+			</OnLoad>
+			<OnUpdate>
+				Quartermaster_Notify_OnUpdate()
+			</OnUpdate>
+			<OnDragStart>
+				Quartermaster_FrameDragStart()
+			</OnDragStart>
+			<OnDragStop>
+				Quartermaster_FrameDragStop()
+			</OnDragStop>
+		</Scripts>
+	</Frame>
+
+	<!-- Mail-sync quick actions (Transfer.lua): Dump Excess + the character/profile
+	     drop buttons, painted once in Quartermaster_Mail_OnLoad. Fixed size since its
+	     three controls never change count, so there's no dynamic-height concern here
+	     (unlike the tracker HUD). Shown only while the mailbox is open (MAIL_SHOW /
+	     MAIL_CLOSED), anchored live to the top of Blizzard's own MailFrame there;
+	     NOT the shared UIParent-relative moveable system Main/Notify use, since this
+	     panel should track the mailbox rather than a fixed screen position. The
+	     CENTER anchor below is only a load-time fallback until that first happens.
+	     Still draggable (a plain native move, gated by the shared lock check) for a
+	     quick nudge, but that isn't persisted; the next mailbox open re-anchors it. -->
+	<Frame name="Quartermaster_Mail" parent="UIParent" movable="true" enableMouse="true" hidden="true">
+		<Size>
+			<AbsDimension x="360" y="66" />
+		</Size>
+		<Anchors>
+			<Anchor point="CENTER" />
+		</Anchors>
+		<Backdrop bgFile="Interface\Tooltips\UI-Tooltip-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+			<BackgroundInsets>
+				<AbsInset left="3" right="3" top="3" bottom="3" />
+			</BackgroundInsets>
+			<TileSize val="16" />
+			<EdgeSize val="12" />
+			<Color r="0" g="0" b="0" a="0.8" />
+			<BorderColor r="1" g="1" b="1" a="0.6" />
+		</Backdrop>
+		<Layers>
+			<Layer level="OVERLAY">
+				<FontString name="$parentTitle" inherits="GameFontNormalSmall" text="Quartermaster - Mail Sync">
+					<Anchors>
+						<Anchor point="TOP">
+							<Offset>
+								<AbsDimension x="0" y="-5" />
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+			<OnLoad>
+				Quartermaster_Mail_OnLoad()
+			</OnLoad>
+			<OnDragStart>
+				Quartermaster_FrameDragStart()
+			</OnDragStart>
+			<OnDragStop>
+				Quartermaster_FrameDragStop()
+			</OnDragStop>
+		</Scripts>
+	</Frame>
+
+</Ui>

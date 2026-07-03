@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Quartermaster.xml is well-formed
+        shell: pwsh
+        run: |
+          [xml](Get-Content Quartermaster.xml -Raw) | Out-Null
+          Write-Host "Quartermaster.xml is well-formed."
+
+      - name: Install Lua 5.1 (syntax checker)
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+
+      - name: Lua syntax check
+        run: |
+          for f in *.lua; do
+            echo "checking $f"
+            luac5.1 -p "$f"
+          done
+
+      - name: Pack addon (smoke test)
+        shell: pwsh
+        run: ./pack.ps1
+
+  release:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack addon
+        shell: pwsh
+        run: ./pack.ps1
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" Quartermaster.zip --generate-notes

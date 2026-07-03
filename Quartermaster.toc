@@ -1,0 +1,16 @@
+## Interface: 11501
+## Title: Quartermaster
+## Notes: Personal raid-prep helper: consumables, reagents, repair, and cross-character stocking
+## Author: Fuff
+## SavedVariables: QuartermasterDB
+
+Core.lua
+Profiles.lua
+ItemDB.lua
+ItemMeta.lua
+Consumables.lua
+Repair.lua
+Transfer.lua
+Notify.lua
+Config.lua
+Quartermaster.xml
