@@ -41,6 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify Quartermaster.toc version matches tag
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          toc_version=$(grep -oP '^## Version:\s*\K.*' Quartermaster.toc | tr -d '\r')
+          if [ "$tag_version" != "$toc_version" ]; then
+            echo "::error::Tag is v$tag_version but Quartermaster.toc has Version: $toc_version"
+            exit 1
+          fi
+          echo "Tag v$tag_version matches Quartermaster.toc."
+
       - name: Pack addon
         shell: pwsh
         run: ./pack.ps1
