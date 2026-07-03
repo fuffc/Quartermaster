@@ -32,8 +32,8 @@ local VALID_TRACK = { buff = true, cd = true, food = true, stock = true }
 --   superwow     -- SetAutoloot or SpellInfo present (either injected global).
 --   nampower     -- GetNampowerVersion present; nampowerVer = {maj,min,pat}.
 --   equippedItem -- GetEquippedItem present (Nampower 2.18+; temp-enchant identity).
---   cUnitAuras   -- C_UnitAuras.GetAuraDataByIndex present (from the ClassicAPI addon, a
---                   pfUI dependency -- NOT native; used only with a fallback, never required).
+--   cUnitAuras   -- C_UnitAuras.GetAuraDataByIndex present (from the ClassicAPI client-side
+--                   patch -- NOT native; used only with a fallback, never required).
 --   itemIdCooldown -- GetItemIdCooldown present (Nampower; surfaces shared CATEGORY cooldowns).
 --   turtleMail   -- TurtleMail loaded with a usable send API (delegate multi-send).
 --   aux          -- aux loaded; reuse its name->id index instead of scanning (set in ItemDB).
@@ -53,9 +53,8 @@ QM.subscribe("READY", function()
 	-- inferring it from the version number -- immune to version-scheme quirks.
 	QM.caps.equippedItem = (type(GetEquippedItem) == "function")
 
-	-- Aura API from the ClassicAPI addon (a pfUI dependency, so present when pfUI is) -- NOT
-	-- native, so always gate on this cap and fall back. Gives direct spellId/timing per aura
-	-- index; the only way to read what a pfUI buff button shows (it calls SetUnitAura).
+	-- Aura API from the ClassicAPI client-side patch -- NOT native, so always gate on this
+	-- cap and fall back. Gives direct spellId/timing per aura index.
 	QM.caps.cUnitAuras = (type(C_UnitAuras) == "table"
 		and type(C_UnitAuras.GetAuraDataByIndex) == "function") or false
 

@@ -58,6 +58,7 @@ at login and unlocks extra precision when they're present:
 | --- | --- | --- |
 | **SuperWoW** (client-side patch) | Buffs can be matched by exact spell ID instead of icon/name, and the Display tab can inject spell IDs into buff tooltips as a discovery aid. | Buffs match by icon/name — reliable for the vast majority of items, just not disambiguated by ID. |
 | **Nampower** (client-side patch, **v2.18+** for one feature) | Weapon temp-enchants (poisons/oils/stones) can be matched by exact enchant ID (`GetEquippedItem`), and item cooldowns read Nampower's shared-category cooldown info (e.g. one elixir putting sibling elixirs on cooldown). | Weapon enchants match by name instead of ID; item cooldowns fall back to a per-bag-slot read. |
+| **ClassicAPI** (client-side patch) | The Display tab's buff-id tooltip injection can read a buff's exact spell ID directly off its aura data (`C_UnitAuras`). | The same tooltip injection falls back to other detection paths (SuperWoW's `GetPlayerBuffID`, Nampower's `UnitBuff`) — id discovery for the default Blizzard buff frame still works either way. |
 | **TurtleMail** (addon) | Quartermaster always uses its own mail sequencer, but if TurtleMail is installed it routes each attach through TurtleMail's preserved original handler instead of the (TurtleMail-replaced) global one, so the two don't fight over the mailbox. | Quartermaster's sequencer drives the mailbox directly — mailing still works exactly the same. |
 | **aux** (addon) | Quartermaster reuses aux's item name→ID index instead of building its own. | Quartermaster builds and maintains its own index by scanning the client's item cache — no action needed, just a bit more one-time work at first login. |
 
@@ -65,9 +66,9 @@ None of these are required, and nothing needs to be configured to enable them �
 detection is automatic and silent.
 
 The addon's own architecture and its use of any *other* local reference addons during
-development (idioms borrowed while building it, not runtime dependencies) are
-documented in [CLAUDE.md](CLAUDE.md)'s "Reference addons" section — nothing there
-needs to be installed to run Quartermaster.
+development (idioms borrowed while building it — distinct from the runtime detection
+above) are documented in [CLAUDE.md](CLAUDE.md)'s "Reference addons" section — nothing
+there needs to be installed to run Quartermaster.
 
 ## Installation
 

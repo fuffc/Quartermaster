@@ -76,7 +76,8 @@ Quartermaster` at the top of each file.
   apply**: `C.use` snapshots the slot's pre-apply enchant so `QM.learnWeaponEnchant` can
   commit the new one only once it differs, avoiding a stale-id window right after replace.
   Also owns **`QM.caps`**, the capability/compat table (`superwow`, `nampower`,
-  `equippedItem`, `turtleMail`, `aux`) every module branches on instead of re-probing.
+  `equippedItem`, `cUnitAuras`, `itemIdCooldown`, `turtleMail`, `aux`) every module
+  branches on instead of re-probing.
 - [Consumables.lua](Consumables.lua) — the **single** per-character desired list (buffs,
   on-use items, stocked reagents together). `C.classify(id, type, subtype)` → apply mode
   (`self`/`weapon`/`target`/`none`) via a curated `APPLY_OVERRIDES` table, then item
