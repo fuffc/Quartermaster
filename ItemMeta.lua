@@ -37,6 +37,8 @@ local VALID_TRACK = { buff = true, cd = true, food = true, stock = true }
 --   itemIdCooldown -- GetItemIdCooldown present (Nampower; surfaces shared CATEGORY cooldowns).
 --   turtleMail   -- TurtleMail loaded with a usable send API (delegate multi-send).
 --   aux          -- aux loaded; reuse its name->id index instead of scanning (set in ItemDB).
+--   inboxItemLink -- GetInboxItemLink present (ClassicAPI client patch -- NOT native;
+--                    Transfer's TakeInboxItem hook falls back to a name lookup without it).
 QM.caps = QM.caps or {}
 
 QM.subscribe("READY", function()
@@ -67,6 +69,8 @@ QM.subscribe("READY", function()
 		and type(TurtleMail.sendmail_send) == "function"
 		and type(TurtleMail.sendmail_clear) == "function"
 		and true) or false
+
+	QM.caps.inboxItemLink = (type(GetInboxItemLink) == "function")
 end)
 
 -- The Track axis's fourth value was renamed "none" -> "stock" (no longer "hide from the
