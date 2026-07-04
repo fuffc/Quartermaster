@@ -1893,7 +1893,11 @@ end
 local panel
 local contentBox          -- bordered region holding the active tab's controls
 local tabButtons = {}
-local pages = {}
+local pages = {}          -- [tab index] -> page frame; built lazily, so this is SPARSE
+                           -- (a tab visited before an earlier one leaves a hole) -- never
+                           -- iterate it with table.getn/#, only index it directly.
+local builtPages = {}      -- append-only (build order), mirroring the `floaters` idiom above --
+                           -- the safe list to sweep-hide on a tab switch.
 local activeTab
 
 -- The tab strip runs along the top. Buttons flow left -> right and wrap onto further
@@ -1954,7 +1958,7 @@ local function selectTab(i)
 	if not tabs or not tabs[i] then return end
 	activeTab = i
 	closeFloaters()
-	for j = 1, table.getn(pages) do if pages[j] then pages[j]:Hide() end end
+	for j = 1, table.getn(builtPages) do builtPages[j]:Hide() end
 	if not pages[i] then
 		-- Pages live INSIDE the bordered content box (so they sit in the box, not on
 		-- the bare panel) and fill it; the box grows with the panel, so do they.
@@ -1962,6 +1966,7 @@ local function selectTab(i)
 		pg:SetPoint("TOPLEFT", contentBox, "TOPLEFT", 6, -6)
 		pg:SetPoint("BOTTOMRIGHT", contentBox, "BOTTOMRIGHT", -6, 6)
 		pages[i] = pg
+		builtPages[table.getn(builtPages) + 1] = pg
 		if tabs[i].build then tabs[i].build(pg) end
 	end
 	pages[i]:Show()
