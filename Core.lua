@@ -75,7 +75,6 @@ local defaults = {
 		autoRepair      = true,
 		repairThreshold = 35,    -- warn when worst item durability % is below this
 		reagentRestock  = true,
-		fillStacksFirst = true,  -- top up partial stacks before making new ones
 		rowOrder        = "config", -- tracker row order: "config" | "active" | "duration"
 		guardReuse      = true, -- block a HUD consume while the buff is up above the low threshold (shift forces)
 		transfer = {

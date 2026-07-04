@@ -113,8 +113,16 @@ Quartermaster` at the top of each file.
   below threshold. Registers the **Repair** config tab.
 - [Transfer.lua](Transfer.lua) — bag/bank/mail movement, both directions.
   `T.plan(charKey, kind)` computes a list's shortfall vs bags plus how much the open
-  bank or other chars' cached inventory could cover. `T.fromBank`/`T.toBank` move
-  stacks between bags and an open bank, filling partial stacks first.
+  bank or other chars' cached inventory could cover. `T.fromBank`/`T.toBank(itemID,
+  amount, done)` move stacks between bags and an open bank, filling partial stacks
+  first, via `planTransfer` — a from-scratch, two-sided plan (one upfront scan of both
+  sides, no re-scanning mid-execution) that tops off existing destination partials
+  (least room left first, so a stack finishes instead of remainder scattering across
+  several) before opening a fresh slot, preferring exact-size source stacks then the
+  largest remaining one. `done(confirmed)` fires once settled, with `confirmed` a
+  verified bag/bank-count diff (`QM.scanInventory`/`QM.itemCount` before vs. after) —
+  never the amount merely *attempted*, since a manipulation can be silently rejected
+  server-side (see the settle gate below).
   `T.mailItems(recipient, queue, onDone)` is the mail sequencer (see "Reference addons"):
   one stack per mail, sequenced on `MAIL_SEND_SUCCESS`. `planStacks(itemID, amount)`
   (via `packStacks`) turns "item X, send N" into a `{bag,slot}` queue, preferring exact
@@ -122,17 +130,33 @@ Quartermaster` at the top of each file.
   can't strand an odd remainder (e.g. target 10 becoming a stray 9+1). It only *reads*
   bags; it does not touch the cursor, and skips non-mailable slots (soulbound/quest/
   conjured, detected by tooltip scan — 1.12 exposes no binding flag).
-  **Only `prepareQueue`/`Prep` may execute that plan**, one action per tick: firing
-  several `SplitContainerItem`/`PickupContainerItem` pairs back-to-back with zero delay
-  desyncs this client (items stay locked mid-transaction, TurtleMail's attach never
-  completes). `Prep` paces a multi-item batch at one step per `PREP_STEP_DELAY` (0.3s),
-  then — because the last manipulation can still be server-lock-pending after that, and
-  mailing an unsettled slot either attaches nothing or silently dies server-side with
-  **no event at all** — ends in a **settle gate** (`queueSettled`): the queue waits until
-  every slot's link is un-`locked` (polled per tick, `SETTLE_TIMEOUT` 5s) before handoff
-  to `T.mailItems`. A status label narrates each phase so a paced batch doesn't look
-  like a hang. Both `T.mailDumpExcess` and `T.supplySend` go through `Prep` rather than
-  calling `planStacks` directly. Owns the **transferable list** (`kind="transferable"`,
+  **Only `runItemActions` may execute a `planStacks`/`planTransfer` plan**, one action
+  per tick: firing several `SplitContainerItem`/`PickupContainerItem` pairs back-to-back
+  with zero delay desyncs this client (items stay locked mid-transaction, TurtleMail's
+  attach never completes, and a bank merge can be rejected outright if the server hasn't
+  caught up). `runItemActions` paces ONE item's plan at a time, one step per
+  `PREP_STEP_DELAY` (0.3s), then — because the last manipulation can still be
+  server-lock-pending after that, and acting on an unsettled slot either fails silently
+  or dies server-side with **no event at all** — ends in a **settle gate**
+  (`queueSettled`): the queue waits until every slot's link is un-`locked` (polled per
+  tick, `SETTLE_TIMEOUT` 5s) before handoff. A status label narrates each phase so a
+  paced batch doesn't look like a hang. `runItemsSequential(items, action, onDone)`
+  drives a multi-item batch by calling `action(item, next)` one item at a time — the
+  next item's plan isn't built until the current one calls `next()` — so a batch never
+  needs more free bag/bank space than a single item's own plan requires. `T.bankSync`
+  uses this to run `T.fromBank`/`T.toBank` one item at a time: safe because a bank
+  transfer that settles a beat early is caught by its own before/after verification
+  (see above), not silently miscounted. Mail does **not** use this per-item shape:
+  `prepItemsBatch(items, callback)` plans every item up front (`planStacks` only
+  reads bag state, and different items never share a slot, so planning item 2 doesn't
+  need item 1's manipulations to have executed first) and concatenates them into one
+  combined action list run through a single `runItemActions` pass, exactly like the
+  original single-queue design — interleaving mail's settle-then-send per item instead
+  measurably made "no server reply to SendMail" (see below) more frequent, since a
+  multi-item batch's later items used to give the server incidental extra real time to
+  catch up on the earlier ones' bag manipulations before the first send; bank moves
+  don't have an equivalent silent-failure mode, so only they interleave. Owns the
+  **transferable list** (`kind="transferable"`,
   same never-rejects classifier as consumables): items to proactively shed, `target`
   repurposed as **Keep** (the floor left behind), plus `bankable` and a per-row
   `mailRecipient`. `transferableFloor(c, e)` resolves that floor for both sync paths: if
@@ -144,7 +168,11 @@ Quartermaster` at the top of each file.
   are left alone, so re-running it after the source profile changes only adds the new
   ones. `T.bankSync()`
   (`/qm banksync`) tops up the tracked list's shortfall from the bank, then (optionally)
-  banks tracked-list and transferable overage above their floors. `T.mailDumpExcess()`
+  banks tracked-list and transferable overage above their floors — asynchronously, one
+  item at a time via `runItemsSequential`, guarded against overlap by `bankSyncing` (the
+  same idea as `Mailer.sending`) and cancelled on `BANKFRAME_CLOSED` the way mail cancels
+  on `MAIL_CLOSED`; the final "topped up X, banked Y" summary reports the confirmed
+  totals from `T.fromBank`/`T.toBank`, not the amounts merely planned. `T.mailDumpExcess()`
   mails transferable overage to its resolved recipient, then (optionally) tracked-list
   overage to the character's `defaultMailRecipient`. `T.supplyPlan`/`T.supplySend`
   answer the inverse of `T.plan` — what *I* can cover of *another* character's shortfall
@@ -218,7 +246,7 @@ Account-wide on purpose — that's what lets a bank alt read the raid char's wan
 ```lua
 QuartermasterDB = {
   options = { locked, showWhenSolo, autoRepair, repairThreshold,
-              reagentRestock, fillStacksFirst, rowOrder,
+              reagentRestock, rowOrder,
               hudHidden, hudHeader, showTargetCount, showItemName, abbreviateNames, hudOutline,
               barTexture,                          -- index into Consumables' BAR_TEXTURES
               buffLowDuration, showBuffIds, guardReuse,

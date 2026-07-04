@@ -87,22 +87,9 @@ local function bankContainers()
 	return list
 end
 
--- First stack of itemID in `containers`, or nil. Returns bag, slot, count.
-local function findStack(containers, itemID)
-	for i = 1, table.getn(containers) do
-		local bag = containers[i]
-		local slots = GetContainerNumSlots(bag) or 0
-		for slot = 1, slots do
-			local link = GetContainerItemLink(bag, slot)
-			if link and QM.itemID(link) == itemID then
-				local _, count = GetContainerItemInfo(bag, slot)
-				return bag, slot, count or 0
-			end
-		end
-	end
-end
-
--- The first completely empty slot in `containers`, or nil.
+-- The first completely empty slot in `containers`, or nil. Used at EXECUTION time
+-- (runAction's "trim" kind) where a live re-scan is correct/necessary -- see
+-- collectEmptySlots below for the planning-time equivalent.
 local function findEmptySlot(containers)
 	for i = 1, table.getn(containers) do
 		local bag = containers[i]
@@ -113,80 +100,218 @@ local function findEmptySlot(containers)
 	end
 end
 
--- A destination slot in `containers` that can take more of itemID: an existing
--- partial stack first (QM.db.options.fillStacksFirst), else the first empty slot.
--- Returns bag, slot, room (nil room = unlimited, i.e. an empty slot).
-local function findDest(containers, itemID, maxStack)
-	if QM.db.options.fillStacksFirst then
-		for i = 1, table.getn(containers) do
-			local bag = containers[i]
-			local slots = GetContainerNumSlots(bag) or 0
-			for slot = 1, slots do
-				local link = GetContainerItemLink(bag, slot)
-				if link and QM.itemID(link) == itemID then
-					local _, count = GetContainerItemInfo(bag, slot)
-					count = count or 0
-					if maxStack and count > 0 and count < maxStack then
-						return bag, slot, maxStack - count
-					end
-				end
+-- Every stack of itemID currently in `containers`, sorted largest-first. The one
+-- full scan both planStacks (mail) and planTransfer (bank) plan an entire batch
+-- from up front -- neither re-scans mid-execution (see runItemActions below for why).
+local function scanStacks(containers, itemID)
+	local stacks = {}
+	for i = 1, table.getn(containers) do
+		local bag = containers[i]
+		local slots = GetContainerNumSlots(bag) or 0
+		for slot = 1, slots do
+			local link = GetContainerItemLink(bag, slot)
+			if link and QM.itemID(link) == itemID then
+				local _, count = GetContainerItemInfo(bag, slot)
+				table.insert(stacks, { bag = bag, slot = slot, count = count or 0 })
 			end
 		end
 	end
-	local bag, slot = findEmptySlot(containers)
-	if bag then return bag, slot, maxStack end
+	table.sort(stacks, function(a, b) return a.count > b.count end)
+	return stacks
 end
 
--- Move up to `amount` of itemID from `fromContainers` to `toContainers`, filling
--- partial destination stacks first. Returns the amount actually moved. Container
--- moves are a single synchronous client action (PickupContainerItem pair), same as
--- any bag-sorting addon -- no OnUpdate throttling needed (unlike the mail sequencer,
--- which is throttled by the mail SERVER's round-trip, a different concern).
-local function moveStacks(itemID, amount, fromContainers, toContainers)
-	if not itemID or amount <= 0 then return 0 end
+-- Every currently-empty slot in `containers`, in scan order. Unlike findEmptySlot,
+-- this is a planning-time snapshot: planTransfer claims slots from this list one at
+-- a time as it needs fresh destinations, so two different actions in the same plan
+-- never get handed the same empty slot (a live re-scan would return the same first
+-- empty slot for both, since nothing has actually moved yet at plan time).
+local function collectEmptySlots(containers)
+	local list = {}
+	for i = 1, table.getn(containers) do
+		local bag = containers[i]
+		local slots = GetContainerNumSlots(bag) or 0
+		for slot = 1, slots do
+			if not GetContainerItemLink(bag, slot) then table.insert(list, { bag = bag, slot = slot }) end
+		end
+	end
+	return list
+end
+
+-- Plans moving `amount` of itemID from `fromContainers` to `toContainers` as a
+-- sequence of `move`/`splitmove` actions (the same kinds runAction already executes
+-- for mail's packStacks) -- one full scan of both sides, no re-scanning mid-plan.
+-- Prefers topping off existing destination partials (least room left first, so a
+-- stack finishes instead of remainder spreading across many) before opening a fresh
+-- empty slot; within either, prefers exact-size source stacks then the largest
+-- remaining one, splitting only what's needed. A destination "target" (existing
+-- partial or freshly opened slot) can absorb several source stacks across the loop --
+-- e.g. two source partials of 7 and 6 both feed the same fresh 13-stack rather than
+-- landing in two separate slots -- which is what keeps this from re-fragmenting stock
+-- that's merely spread across a couple of source stacks. Returns (actions, queue,
+-- shortfall); shortfall > 0 means source stock or destination room ran out.
+local function planTransfer(itemID, amount, fromContainers, toContainers)
 	local _, _, _, _, _, _, maxStack = GetItemInfo("item:" .. itemID)
 	maxStack = maxStack or 1
-	local moved = 0
-	while moved < amount do
-		local srcBag, srcSlot, srcCount = findStack(fromContainers, itemID)
-		if not srcBag then break end
-		local dstBag, dstSlot, room = findDest(toContainers, itemID, maxStack)
-		if not dstBag then break end
-		local take = amount - moved
-		if take > srcCount then take = srcCount end
-		if room and take > room then take = room end
-		if take <= 0 then break end
-		ClearCursor()
-		if take < srcCount then
-			SplitContainerItem(srcBag, srcSlot, take)
-		else
-			PickupContainerItem(srcBag, srcSlot)
+
+	local sources = scanStacks(fromContainers, itemID)
+	local dests = scanStacks(toContainers, itemID)
+	local targets = {}
+	for i = 1, table.getn(dests) do
+		local d = dests[i]
+		if d.count < maxStack then
+			table.insert(targets, { bag = d.bag, slot = d.slot, room = maxStack - d.count })
 		end
-		PickupContainerItem(dstBag, dstSlot)
-		ClearCursor()
-		moved = moved + take
 	end
-	return moved
+	table.sort(targets, function(a, b) return a.room < b.room end)
+
+	local empties = collectEmptySlots(toContainers)
+	local nextEmpty = 0
+
+	local function anySourceLeft()
+		for i = 1, table.getn(sources) do
+			if sources[i].count > 0 then return true end
+		end
+		return false
+	end
+
+	-- Claims up to `need` from one source stack in a single manipulation: an
+	-- exact-size stack first (no split needed), else the largest remaining one
+	-- (split off `need` if it overshoots). Returns bag, slot, amount, isSplit.
+	local function takeFrom(need)
+		for i = 1, table.getn(sources) do
+			if sources[i].count == need then
+				local s = sources[i]
+				s.count = 0
+				return s.bag, s.slot, need, false
+			end
+		end
+		for i = 1, table.getn(sources) do
+			if sources[i].count > 0 then
+				local s = sources[i]
+				local take = s.count < need and s.count or need
+				local split = take < s.count
+				s.count = s.count - take
+				return s.bag, s.slot, take, split
+			end
+		end
+	end
+
+	local actions, queue = {}, {}
+	local remaining = amount
+	local ti = 0
+	while remaining > 0 and anySourceLeft() do
+		ti = ti + 1
+		local target = targets[ti]
+		if not target then
+			nextEmpty = nextEmpty + 1
+			local slot = empties[nextEmpty]
+			if not slot then break end
+			target = { bag = slot.bag, slot = slot.slot, room = maxStack }
+			table.insert(targets, target)
+		end
+		while target.room > 0 and remaining > 0 do
+			local need = remaining < target.room and remaining or target.room
+			local bag, slot, take, split = takeFrom(need)
+			if not bag then break end
+			if split then
+				table.insert(actions, { kind = "splitmove", bag = bag, slot = slot,
+					amount = take, destBag = target.bag, destSlot = target.slot })
+			else
+				table.insert(actions, { kind = "move", bag = bag, slot = slot,
+					destBag = target.bag, destSlot = target.slot })
+			end
+			table.insert(queue, { bag = target.bag, slot = target.slot })
+			remaining = remaining - take
+			target.room = target.room - take
+		end
+	end
+
+	return actions, queue, remaining
 end
 
 -- ---------------------------------------------------------------------------
--- Bank -> bags (fill partial stacks first)
+-- Status label: what the prep/mail machinery is doing right now, floated above
+-- the mailbox (everything here runs only while mail is open). nil text hides it.
 -- ---------------------------------------------------------------------------
--- Move `amount` of itemID from the open bank into bags, topping up partial bag
--- stacks before making new ones (QM.db.options.fillStacksFirst).
-function T.fromBank(itemID, amount)
-	if not QM.bankOpen then QM.print("open your bank first"); return 0 end
-	return moveStacks(itemID, amount, bankContainers(), bagContainers())
+local Status
+local function setStatus(text)
+	if not text then
+		if Status then Status:Hide() end
+		return
+	end
+	if not Status then
+		Status = CreateFrame("Frame", nil, UIParent)
+		Status:SetFrameStrata("DIALOG")
+		Status:SetHeight(26)
+		Status:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 12,
+			insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+		Status:SetBackdropColor(0, 0, 0, 0.85)
+		Status.label = Status:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+		Status.label:SetPoint("CENTER", 0, 0)
+	end
+	Status:ClearAllPoints()
+	if QM.mailFrame and QM.mailFrame:IsShown() then
+		Status:SetPoint("BOTTOM", QM.mailFrame, "TOP", 0, 4)
+	elseif MailFrame then
+		Status:SetPoint("BOTTOM", MailFrame, "TOP", 0, 8)
+	else
+		Status:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+	end
+	Status.label:SetText(text)
+	Status:SetWidth(Status.label:GetStringWidth() + 26)
+	Status:Show()
 end
 
--- ---------------------------------------------------------------------------
--- Bags -> bank (fill partial stacks first)
--- ---------------------------------------------------------------------------
--- Move `amount` of itemID from bags into the open bank, topping up partial bank
--- stacks before making new ones.
-function T.toBank(itemID, amount)
-	if not QM.bankOpen then QM.print("open your bank first"); return 0 end
-	return moveStacks(itemID, amount, bagContainers(), bankContainers())
+-- Forward declares: the paced/settled action engine, the generic per-item
+-- sequencer, and cancellation both live further down (alongside the Prep frame /
+-- Mailer), but T.fromBank/T.toBank/T.bankSync and the Mailer's MAIL_CLOSED handler
+-- all need them here. `bankSyncing` guards against a second /qm banksync overlapping
+-- an in-progress one, the same idea as Mailer.sending.
+local runItemActions
+local runItemsSequential
+local cancelPrep
+local bankSyncing = false
+
+-- Async: moves `amount` of itemID from the bank into bags via planTransfer, one
+-- paced/settled manipulation at a time (see runItemActions) -- never more than one
+-- Pickup/Split pair per tick, unlike the old synchronous version. `done(confirmed)`
+-- fires once settled, with the amount actually verified moved (a bag-count diff via
+-- QM.scanInventory/QM.itemCount), not just the amount attempted.
+function T.fromBank(itemID, amount, done)
+	if not QM.bankOpen then
+		QM.print("open your bank first")
+		if done then done(0) end
+		return
+	end
+	QM.scanInventory()
+	local bagsBefore = QM.itemCount(itemID)
+	local actions, queue = planTransfer(itemID, amount, bankContainers(), bagContainers())
+	runItemActions(actions, queue, function()
+		QM.scanInventory()
+		local bagsAfter = QM.itemCount(itemID)
+		local confirmed = bagsAfter - bagsBefore
+		if done then done(confirmed > 0 and confirmed or 0) end
+	end)
+end
+
+-- Async counterpart of T.fromBank: moves `amount` of itemID from bags into the open
+-- bank. `done(confirmed)` fires once settled, verified via a bank-count diff.
+function T.toBank(itemID, amount, done)
+	if not QM.bankOpen then
+		QM.print("open your bank first")
+		if done then done(0) end
+		return
+	end
+	QM.scanInventory()
+	local _, bankBefore = QM.itemCount(itemID)
+	local actions, queue = planTransfer(itemID, amount, bagContainers(), bankContainers())
+	runItemActions(actions, queue, function()
+		QM.scanInventory()
+		local _, bankAfter = QM.itemCount(itemID)
+		local confirmed = bankAfter - bankBefore
+		if done then done(confirmed > 0 and confirmed or 0) end
+	end)
 end
 
 -- The floor to leave behind for a transferable-list entry. If the same item is ALSO in
@@ -226,19 +351,39 @@ end
 -- /qm banksync -- top up tracked-list shortfalls from the bank, then (optionally)
 -- bank tracked-list overage and everything bankable in the transferable list.
 -- ---------------------------------------------------------------------------
+-- Runs `items` ({ {id=,name=,amount=}, ... }) one at a time through `mover`
+-- (T.fromBank or T.toBank), accumulating the verified (not attempted) total moved,
+-- warning per item when it fell short of the plan. `done(total)` fires once every
+-- item has settled.
+local function bankSyncPass(items, mover, done)
+	local total = 0
+	runItemsSequential(items, function(item, next)
+		mover(item.id, item.amount, function(confirmed)
+			if confirmed < item.amount then
+				local name = item.name or GetItemInfo("item:" .. item.id) or ("item " .. item.id)
+				QM.print(confirmed .. "x " .. name .. " moved -- short of the planned " .. item.amount)
+			end
+			total = total + confirmed
+			next()
+		end)
+	end, function() done(total) end)
+end
+
 function T.bankSync()
 	if not QM.bankOpen then QM.print("open your bank first"); return end
+	if bankSyncing then QM.print("banksync already running"); return end
 	local c = QM.me
 	if not c then return end
 
-	local topped = 0
+	local topUp, overage = {}, {}
 	local plan = T.plan(QM.charKey(), "consumables")
 	for i = 1, table.getn(plan) do
 		local row = plan[i]
-		if row.fromBank > 0 then topped = topped + T.fromBank(row.id, row.fromBank) end
+		if row.fromBank > 0 then
+			table.insert(topUp, { id = row.id, name = row.name, amount = row.fromBank })
+		end
 	end
 
-	local banked = 0
 	if QM.db.options.transfer.dumpTrackedOverage then
 		local list = c.consumables or {}
 		for i = 1, table.getn(list) do
@@ -248,8 +393,8 @@ function T.bankSync()
 			-- for why processing one here too would over-bank it.
 			if not QM.isDivider(e) and QM.itemActive(e) and not inTransferableList(c, e.id) then
 				local bags = QM.itemCount(e.id)
-				local overage = bags - (e.target or 0)
-				if overage > 0 then banked = banked + T.toBank(e.id, overage) end
+				local amt = bags - (e.target or 0)
+				if amt > 0 then table.insert(overage, { id = e.id, name = e.name, amount = amt }) end
 			end
 		end
 	end
@@ -259,50 +404,32 @@ function T.bankSync()
 		local e = tlist[i]
 		if not QM.isDivider(e) and QM.itemActive(e) and e.bankable then
 			local bags = QM.itemCount(e.id)
-			local excess = bags - transferableFloor(c, e)
-			if excess > 0 then banked = banked + T.toBank(e.id, excess) end
+			local amt = bags - transferableFloor(c, e)
+			if amt > 0 then table.insert(overage, { id = e.id, name = e.name, amount = amt }) end
 		end
 	end
 
-	QM.scanInventory()
-	QM.print("banksync: topped up " .. topped .. ", banked " .. banked)
+	bankSyncing = true
+	bankSyncPass(topUp, T.fromBank, function(topped)
+		bankSyncPass(overage, T.toBank, function(banked)
+			bankSyncing = false
+			setStatus(nil)
+			QM.scanInventory()
+			QM.print("banksync: topped up " .. topped .. ", banked " .. banked)
+		end)
+	end)
 end
 
--- ---------------------------------------------------------------------------
--- Status label: what the prep/mail machinery is doing right now, floated above
--- the mailbox (everything here runs only while mail is open). nil text hides it.
--- ---------------------------------------------------------------------------
-local Status
-local function setStatus(text)
-	if not text then
-		if Status then Status:Hide() end
-		return
+-- Closing the bank mid-sync leaves nothing left to move into/out of -- cancel
+-- whatever's in flight (mirrors Mailer's MAIL_CLOSED handling below) rather than
+-- letting it stall on a settle timeout against a container that's no longer open.
+QM.on("BANKFRAME_CLOSED", function()
+	if bankSyncing then
+		cancelPrep()
+		bankSyncing = false
+		setStatus(nil)
 	end
-	if not Status then
-		Status = CreateFrame("Frame", nil, UIParent)
-		Status:SetFrameStrata("DIALOG")
-		Status:SetHeight(26)
-		Status:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 12,
-			insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-		Status:SetBackdropColor(0, 0, 0, 0.85)
-		Status.label = Status:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-		Status.label:SetPoint("CENTER", 0, 0)
-	end
-	Status:ClearAllPoints()
-	if QM.mailFrame and QM.mailFrame:IsShown() then
-		Status:SetPoint("BOTTOM", QM.mailFrame, "TOP", 0, 4)
-	elseif MailFrame then
-		Status:SetPoint("BOTTOM", MailFrame, "TOP", 0, 8)
-	else
-		Status:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
-	end
-	Status.label:SetText(text)
-	Status:SetWidth(Status.label:GetStringWidth() + 26)
-	Status:Show()
-end
-
-local cancelPrep   -- defined with the Prep frame below; the Mailer's MAIL_CLOSED needs it first
+end)
 
 -- ---------------------------------------------------------------------------
 -- Mail sequencer (one item per mail)
@@ -317,8 +444,11 @@ Mailer.queue     = {}     -- ordered list of { bag, slot }
 Mailer.index     = 0
 Mailer.recipient = nil
 Mailer.sending   = false
-Mailer.pending   = false  -- counting down to the next send
+Mailer.pending   = false  -- counting down to the next attach
 Mailer.elapsed   = 0
+Mailer.pendingSend = false -- attached, counting down before the SendMail call itself
+Mailer.sendElapsed = 0
+Mailer.pendingSubject = nil
 Mailer.waiting   = false  -- attached + SendMail called, awaiting confirmation
 Mailer.waitElapsed = 0
 Mailer.sentCount = 0
@@ -356,6 +486,7 @@ local function finishMailing()
 	Mailer:SetScript("OnUpdate", nil)
 	Mailer.sending = false
 	Mailer.pending = false
+	Mailer.pendingSend = false
 	Mailer.waiting = false
 	-- Retrieve whatever an aborted batch left in the native send slot (ClearCursor
 	-- returns the picked-up stack to the bag slot it came from).
@@ -422,7 +553,21 @@ local function sendCurrentMailItem()
 	-- Name each mail after its item, the way TurtleMail does.
 	local subject = itemName
 	if stackCount and stackCount > 1 then subject = subject .. " (" .. stackCount .. ")" end
-	SendMail(Mailer.recipient, subject, "")
+	Mailer.pendingSubject = subject
+	-- The attach (ClickSendMailItemButton) and the SendMail call are two separate
+	-- server round-trips, same as any other container-touching action on this
+	-- client -- calling SendMail in the same breath as the attach can get NO reply at
+	-- all if the server hasn't caught up on the attach yet (confirmed: this happens
+	-- with or without TurtleMail, and only when something is actually attached first --
+	-- a bare SendMail with nothing attached always gets an instant reply). Give the
+	-- attach one more beat to land before asking the server to send it.
+	Mailer.pendingSend = true
+	Mailer.sendElapsed = 0
+end
+
+local function dispatchMailSend()
+	Mailer.pendingSend = false
+	SendMail(Mailer.recipient, Mailer.pendingSubject, "")
 	Mailer.waiting = true
 	Mailer.waitElapsed = 0
 end
@@ -432,6 +577,9 @@ local function onMailUpdate()
 	if Mailer.pending then
 		Mailer.elapsed = Mailer.elapsed + elapsed
 		if Mailer.elapsed >= MAIL_SEND_DELAY then sendCurrentMailItem() end
+	elseif Mailer.pendingSend then
+		Mailer.sendElapsed = Mailer.sendElapsed + elapsed
+		if Mailer.sendElapsed >= MAIL_SEND_DELAY then dispatchMailSend() end
 	elseif Mailer.waiting then
 		Mailer.waitElapsed = Mailer.waitElapsed + elapsed
 		if Mailer.waitElapsed >= MAIL_SEND_TIMEOUT then
@@ -500,6 +648,7 @@ function T.mailItems(recipient, queue, onDone)
 	Mailer.queue   = queue
 	Mailer.index   = 1
 	Mailer.waiting = false
+	Mailer.pendingSend = false
 	Mailer.pending = true
 	Mailer.elapsed = 0
 	Mailer:SetScript("OnUpdate", onMailUpdate)
@@ -778,28 +927,22 @@ end
 -- "actions" needed to realize it (that queue's mail-side use of `pending` placeholders
 -- is documented on packStacks above), plus how much of `amount` unmailable slots cost
 -- (the caller's count doesn't know about binding). The actions are NOT run here: see
--- prepNextStep below for why.
+-- runItemActions below for why.
 local function planStacks(itemID, amount)
 	local _, _, _, _, _, _, maxStack = GetItemInfo("item:" .. itemID)
 	maxStack = maxStack or 1
 
+	local scanned = scanStacks(bagContainers(), itemID)
 	local stacks, mailable, unmailable = {}, 0, 0
-	for bag = 0, 4 do
-		local slots = GetContainerNumSlots(bag) or 0
-		for slot = 1, slots do
-			local link = GetContainerItemLink(bag, slot)
-			if link and QM.itemID(link) == itemID then
-				local _, count = GetContainerItemInfo(bag, slot)
-				if slotMailable(bag, slot) then
-					table.insert(stacks, { bag = bag, slot = slot, count = count or 0, used = false })
-					mailable = mailable + (count or 0)
-				else
-					unmailable = unmailable + (count or 1)
-				end
-			end
+	for i = 1, table.getn(scanned) do
+		local s = scanned[i]
+		if slotMailable(s.bag, s.slot) then
+			table.insert(stacks, s)
+			mailable = mailable + s.count
+		else
+			unmailable = unmailable + s.count
 		end
 	end
-	table.sort(stacks, function(a, b) return a.count > b.count end)
 
 	local short = amount - mailable
 	if short < 0 then short = 0 end
@@ -827,24 +970,24 @@ local function planStacks(itemID, amount)
 end
 
 -- ---------------------------------------------------------------------------
--- Async queue prep: turn several items' { id, amount } requests into one combined
--- { bag, slot } queue, running at most one bag-touching action per PREP_STEP_DELAY
--- tick -- across items AND within a single item's own stack assembly -- before
--- handing the complete queue off in one shot.
+-- Paced/settled action engine: executes ONE item's plan (from planStacks or
+-- planTransfer) at a time, at most one bag/bank-touching action per
+-- PREP_STEP_DELAY tick, then holds at a settle gate before handing the result back.
 -- ---------------------------------------------------------------------------
--- IMPORTANT: this is the only place allowed to execute a planStacks() plan. Firing
--- several Pickup/SplitContainerItem pairs back-to-back with zero delay between them --
--- even for the SAME item, e.g. merging two partial stacks together and THEN topping the
--- result up from a third -- desyncs this client (compounded by TurtleMail globally
--- hooking PickupContainerItem): items are left locked ("greyed") mid-transaction and
--- TurtleMail's attach never completes, so no mail fires and the batch just stalls on
--- its watchdog timeout. One manipulation per tick, no exceptions, fixes it.
+-- IMPORTANT: this is the only place allowed to execute a planStacks()/planTransfer()
+-- plan. Firing several Pickup/SplitContainerItem pairs back-to-back with zero delay
+-- between them -- even for the SAME item, e.g. merging two partial stacks together and
+-- THEN topping the result up from a third -- desyncs this client (compounded by
+-- TurtleMail globally hooking PickupContainerItem): items are left locked ("greyed")
+-- mid-transaction, an attach never completes, and bank slots can reject a merge the
+-- server never actually saw settle. One manipulation per tick, no exceptions, fixes it.
 local Prep = CreateFrame("Frame")
-local PREP_STEP_DELAY = 0.3 -- lets one manipulation settle before the next --
-                            -- either the next item, or the next step within this
-                            -- item's own assembly -- touches bags. See above.
-local SETTLE_TIMEOUT = 5    -- settle gate: give up waiting for locks and send
-                            -- whatever is actually sendable (see queueSettled)
+local PREP_STEP_DELAY = 0.3 -- lets one manipulation settle before the next touches
+                            -- bags/bank. See above.
+local SETTLE_TIMEOUT = 5    -- settle gate: give up waiting for locks and hand back
+                            -- whatever actually resolved (see queueSettled)
+
+local prepBusy = false
 
 local function runAction(a, queue)
 	ClearCursor()
@@ -890,98 +1033,98 @@ local function queueSettled(queue)
 	return true
 end
 
-local function finishPrep()
+local function finishItemActions()
 	Prep:SetScript("OnUpdate", nil)
-	Prep.settling = false
+	prepBusy = false
 	setStatus(nil)
-	local cb, queue = Prep.callback, Prep.queue
-	Prep.items, Prep.queue, Prep.callback = nil, nil, nil
+	local cb, queue = Prep.onSettled, Prep.queue
+	Prep.actions, Prep.queue, Prep.onSettled = nil, nil, nil
 	if cb then cb(queue) end
 end
 
-local function beginItem()
-	Prep.index = Prep.index + 1
-	if Prep.index > table.getn(Prep.items) then
-		-- Plan done, but don't hand the queue over yet -- hold it at the settle gate
-		-- (see queueSettled) until the last manipulations' locks clear.
-		Prep.settling, Prep.settleElapsed = true, 0
-		setStatus("Waiting for item locks to settle")
-		return
+-- Settle timed out (a rejected manipulation, e.g. a bank merge the server won't
+-- allow, unlocks on its own once the server replies -- it just never resolves to the
+-- amount the plan expected, which the caller's own before/after verification catches):
+-- drop whatever never resolved to a real slot and hand back what's actually there
+-- rather than stall the batch forever.
+local function settleFallback()
+	local kept = {}
+	for i = 1, table.getn(Prep.queue) do
+		local q = Prep.queue[i]
+		if q.bag and GetContainerItemLink(q.bag, q.slot) then table.insert(kept, q) end
 	end
-	local item = Prep.items[Prep.index]
-	local name = item.name or GetItemInfo("item:" .. item.id) or ("item " .. item.id)
-	setStatus("Preparing stacks: " .. name .. " (" .. Prep.index .. "/" .. table.getn(Prep.items) .. ")")
-	local itemQueue, actions, unmailable = planStacks(item.id, item.amount)
-	if unmailable > 0 then
-		QM.print(unmailable .. "x " .. name .. " skipped -- can't be mailed (soulbound/quest/conjured)")
-	end
-	for i = 1, table.getn(actions) do actions[i].token = i end
-	Prep.itemQueue, Prep.actions, Prep.actionIndex = itemQueue, actions, 0
+	local dropped = table.getn(Prep.queue) - table.getn(kept)
+	if dropped > 0 then QM.print(dropped .. " stack(s) skipped -- bag/bank slot never settled") end
+	Prep.queue = kept
+	finishItemActions()
 end
 
 -- One tick, one action: either the next manipulation this item's plan still needs, or
--- (once it has none left) folding its finished queue in and planning the next item.
--- Once all items are planned, ticks poll the settle gate instead.
-local function prepNextStep()
+-- (once it has none left) polling the settle gate.
+local function prepStep()
 	if Prep.settling then
-		if queueSettled(Prep.queue) then finishPrep(); return end
+		if queueSettled(Prep.queue) then finishItemActions(); return end
 		Prep.settleElapsed = Prep.settleElapsed + PREP_STEP_DELAY
-		if Prep.settleElapsed >= SETTLE_TIMEOUT then
-			-- Something never unlocked, or a planned slot ended up empty. Drop what
-			-- can't attach and send the rest rather than stall the whole batch.
-			local kept = {}
-			for i = 1, table.getn(Prep.queue) do
-				local q = Prep.queue[i]
-				if q.bag and GetContainerItemLink(q.bag, q.slot) then table.insert(kept, q) end
-			end
-			local dropped = table.getn(Prep.queue) - table.getn(kept)
-			if dropped > 0 then QM.print(dropped .. " stack(s) skipped -- bag slot never settled") end
-			Prep.queue = kept
-			finishPrep()
-		end
+		if Prep.settleElapsed >= SETTLE_TIMEOUT then settleFallback() end
 		return
 	end
-	if Prep.actions and Prep.actionIndex < table.getn(Prep.actions) then
+	if Prep.actionIndex < table.getn(Prep.actions) then
 		Prep.actionIndex = Prep.actionIndex + 1
-		runAction(Prep.actions[Prep.actionIndex], Prep.itemQueue)
+		runAction(Prep.actions[Prep.actionIndex], Prep.queue)
 		return
 	end
-	if Prep.itemQueue then
-		for i = 1, table.getn(Prep.itemQueue) do table.insert(Prep.queue, Prep.itemQueue[i]) end
-	end
-	beginItem()
+	Prep.settling, Prep.settleElapsed = true, 0
+	setStatus("Waiting for item locks to settle")
 end
 
--- Mailbox closed mid-prep: nothing downstream can send anymore, so stop stepping
--- and drop the batch (the callback is never fired).
-cancelPrep = function()
-	if not Prep.items then return end
-	Prep:SetScript("OnUpdate", nil)
-	Prep.items, Prep.queue, Prep.callback, Prep.settling = nil, nil, nil, false
-	setStatus(nil)
-end
-
--- Build the combined { bag, slot } queue for `items` ({ {id=,amount=}, ... }), one
--- manipulation per tick, then calls callback(queue). The first step runs on the next
--- frame (not synchronously) so every item, including the first, goes through the
--- exact same paced path.
-local function prepareQueue(items, callback)
-	if table.getn(items) == 0 then callback({}); return end
-	if Prep.items then
-		-- A second run would clobber the in-flight one's state mid-batch and
-		-- interleave bag manipulations -- exactly the desync this frame exists to
-		-- prevent. (A stuck prep can't wedge this forever: the settle gate times out.)
+-- Runs one item's `actions` (from planStacks or planTransfer), one manipulation per
+-- tick, then settles `queue` before calling onSettled(queue). Only one instance may
+-- run at a time -- a second call while busy would interleave bag/bank manipulations
+-- across two unrelated plans, exactly the desync this engine exists to prevent (a
+-- stuck run can't wedge this forever: the settle gate above times out).
+runItemActions = function(actions, queue, onSettled)
+	if prepBusy then
 		QM.print("bag prep already running -- try again in a moment")
 		return
 	end
-	Prep.items, Prep.index, Prep.queue, Prep.callback = items, 0, {}, callback
-	Prep.itemQueue, Prep.actions, Prep.actionIndex = nil, nil, 0
+	prepBusy = true
+	Prep.actions, Prep.actionIndex, Prep.queue, Prep.onSettled = actions, 0, queue, onSettled
 	Prep.settling, Prep.settleElapsed = false, 0
 	Prep.elapsed = PREP_STEP_DELAY
 	Prep:SetScript("OnUpdate", function()
 		Prep.elapsed = Prep.elapsed + arg1
-		if Prep.elapsed >= PREP_STEP_DELAY then Prep.elapsed = 0; prepNextStep() end
+		if Prep.elapsed >= PREP_STEP_DELAY then Prep.elapsed = 0; prepStep() end
 	end)
+end
+
+-- Mailbox/bank closed mid-batch: nothing downstream can act on it anymore, so stop
+-- ticking and drop the run (onSettled is never fired).
+cancelPrep = function()
+	if not prepBusy then return end
+	Prep:SetScript("OnUpdate", nil)
+	prepBusy = false
+	Prep.actions, Prep.queue, Prep.onSettled, Prep.settling = nil, nil, nil, false
+	setStatus(nil)
+end
+
+-- Drives `items` ({ {id=,...}, ... }) one at a time: action(item, next) does
+-- whatever async work that one item needs (see bankSyncPass) and calls next() when
+-- ready for the next item -- so at most one item's stacks are ever "in flight" at
+-- once, unlike building one combined multi-item queue up front (which needs enough
+-- free bag/bank space for every item's plan simultaneously). Bank moves self-verify
+-- (a real before/after count diff), so a transfer that settles a little early just
+-- reports a smaller confirmed amount -- unlike mail (which batches all items into one
+-- prep/settle/send pass instead, see prepItemsBatch further down), this is safe to
+-- run one item at a time.
+runItemsSequential = function(items, action, onDone)
+	local index = 0
+	local function step()
+		index = index + 1
+		local item = items[index]
+		if not item then onDone(); return end
+		action(item, step)
+	end
+	step()
 end
 
 -- ---------------------------------------------------------------------------
@@ -1080,6 +1223,33 @@ end
 -- each row's resolved recipient (its own mailRecipient, else the character's
 -- defaultMailRecipient), one recipient batch after another through the Mailer.
 -- ---------------------------------------------------------------------------
+-- Plans every item's bag stacks up front (planStacks only READS bag state, and
+-- different items never share a slot, so planning item 2 doesn't need item 1's
+-- manipulations to have executed first) and concatenates them into ONE combined
+-- action list, run through runItemActions as a single paced/settled pass. Unlike
+-- bank moves (verified by a real before/after count diff either way), a rejected or
+-- premature SendMail on this server can get **no reply at all** -- settling and
+-- sending one item at a time removed the incidental real-world delay a multi-item
+-- batch used to give the server to catch up between the last bag manipulation and
+-- the first SendMail, which measurably made that failure more frequent. Mail keeps
+-- the batch-then-send shape; only bank moves (which self-verify) interleave per item.
+local function prepItemsBatch(items, callback)
+	if table.getn(items) == 0 then callback({}); return end
+	local allActions, allQueue = {}, {}
+	for i = 1, table.getn(items) do
+		local item = items[i]
+		local name = item.name or GetItemInfo("item:" .. item.id) or ("item " .. item.id)
+		local queue, actions, unmailable = planStacks(item.id, item.amount)
+		if unmailable > 0 then
+			QM.print(unmailable .. "x " .. name .. " skipped -- can't be mailed (soulbound/quest/conjured)")
+		end
+		for j = 1, table.getn(actions) do table.insert(allActions, actions[j]) end
+		for j = 1, table.getn(queue) do table.insert(allQueue, queue[j]) end
+	end
+	setStatus("Preparing stacks (" .. table.getn(items) .. " item" .. (table.getn(items) == 1 and "" or "s") .. ")")
+	runItemActions(allActions, allQueue, callback)
+end
+
 function T.mailDumpExcess()
 	local c = QM.me
 	if not c then return end
@@ -1124,7 +1294,7 @@ function T.mailDumpExcess()
 	local function sendNext(i)
 		if i > table.getn(order) then QM.scanInventory(); return end
 		local recipient = order[i]
-		prepareQueue(groups[recipient], function(queue)
+		prepItemsBatch(groups[recipient], function(queue)
 			if table.getn(queue) > 0 then
 				T.mailItems(recipient, queue, function() sendNext(i + 1) end)
 			else
@@ -1215,7 +1385,7 @@ function T.supplySend(targetCharKey, profileName)
 	QM.scanInventory()
 	local before = {}
 	for i = 1, table.getn(rows) do before[rows[i].id] = QM.itemCount(rows[i].id) end
-	prepareQueue(rows, function(queue)
+	prepItemsBatch(rows, function(queue)
 		T.mailItems(targetCharKey, queue, function()
 			QM.scanInventory()
 			for i = 1, table.getn(rows) do
