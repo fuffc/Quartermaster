@@ -125,8 +125,22 @@ function QM.Config.editbox(parent, width, onCommit)
 	e:SetBackdrop(EDITBOX_BACKDROP)
 	e:SetBackdropColor(0, 0, 0, 0.7)
 	e:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
+	local escaping = false
 	e:SetScript("OnEnterPressed", function() onCommit(this:GetText()); this:ClearFocus() end)
-	e:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+	-- Escape means discard: suppress the focus-lost commit below so the box just reverts
+	-- to the saved value on the next repaint instead of committing the abandoned text.
+	e:SetScript("OnEscapePressed", function() escaping = true; this:ClearFocus() end)
+	-- Commit on focus loss too, not just Enter -- so a value typed then abandoned by
+	-- clicking elsewhere still lands rather than reverting silently. Tracked in
+	-- QM.Config._focusedEditBox so the panel's OnHide can force this even when hiding the
+	-- frame doesn't itself raise a focus-lost event (closing the config with a box still
+	-- focused).
+	e:SetScript("OnEditFocusGained", function() QM.Config._focusedEditBox = this end)
+	e:SetScript("OnEditFocusLost", function()
+		if QM.Config._focusedEditBox == this then QM.Config._focusedEditBox = nil end
+		if escaping then escaping = false
+		elseif onCommit then onCommit(this:GetText()) end
+	end)
 	return e
 end
 
@@ -475,7 +489,11 @@ function QM.Config.promptText(titleText, initial, onCommit)
 	if not promptFrame then
 		local p = modalShell(300, 92)
 		promptFrame = p
-		p.box = QM.Config.editbox(p, 200, function(text) p.commit(text) end)
+		-- No onCommit here (and OnEnterPressed set explicitly below): this is a one-shot
+		-- OK/Cancel action, not a persistent field, so closing it any other way (the X,
+		-- or the panel closing under it) must discard rather than auto-commit on blur.
+		p.box = QM.Config.editbox(p, 200)
+		p.box:SetScript("OnEnterPressed", function() p.commit(this:GetText()); this:ClearFocus() end)
 		p.box:SetPoint("TOPLEFT", 12, -32)
 		local ok = QM.Config.button(p, "OK", function() p.commit(p.box:GetText()) end)
 		ok:SetWidth(60)
@@ -1960,6 +1978,11 @@ local function build()
 	panel:RegisterForDrag("LeftButton")
 	panel:SetScript("OnDragStart", function() panel:StartMoving() end)
 	panel:SetScript("OnDragStop", function() panel:StopMovingOrSizing() end)
+	-- Force-commit a still-focused edit box (e.g. Target/Low) when the panel is closed
+	-- without pressing Enter or tabbing away first -- see QM.Config.editbox.
+	panel:SetScript("OnHide", function()
+		if QM.Config._focusedEditBox then QM.Config._focusedEditBox:ClearFocus() end
+	end)
 
 	local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	title:SetPoint("TOP", 0, -14); title:SetText("Quartermaster")

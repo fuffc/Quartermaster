@@ -620,18 +620,23 @@ end
 -- QM.addInFlight on the sending side. Reads the itemID by link the same way the
 -- rest of this file does (QM.itemID), since GetInboxItemLink's extra returns
 -- aren't reliable on this client. A no-op for any item that isn't in flight.
+-- GetInboxItemLink itself is a ClassicAPI client-patch addition, not native to this
+-- client (QM.caps.inboxItemLink) -- without it, fall back to GetInboxItem's own name
+-- return resolved through ItemDB (exact match; the name IS the item's real name here).
 -- ---------------------------------------------------------------------------
 local origTakeInboxItem = TakeInboxItem
 function TakeInboxItem(index, attachIndex)
 	local charKey = QM.me and QM.charKey()
 	local itemID, count
 	if charKey then
-		local link = GetInboxItemLink(index, attachIndex)
-		itemID = link and QM.itemID(link)
-		if itemID then
-			local _, _, c = GetInboxItem(index, attachIndex)
-			count = c or 1
+		local name, _, c = GetInboxItem(index, attachIndex)
+		if QM.caps.inboxItemLink then
+			local link = GetInboxItemLink(index, attachIndex)
+			itemID = link and QM.itemID(link)
+		else
+			itemID = name and QM.resolveName(name)
 		end
+		if itemID then count = c or 1 end
 	end
 	origTakeInboxItem(index, attachIndex)
 	if itemID then QM.clearInFlight(charKey, itemID, count) end
@@ -1363,10 +1368,15 @@ QM.registerConfigTab({
 
 				-- One row, left-aligned under the section header: the add box + Add button
 				-- first, then the custom-recipient listbox, then the default-recipient drop.
+				-- No onCommit (add explicitly via Enter/the Add button only): this is an
+				-- add-new-entry box, not a persistent field, so blurring away from it (see
+				-- QM.Config.editbox) must not silently add whatever text is left sitting in it.
 				local addRecipBox
-				addRecipBox = QM.Config.editbox(page, 100, function(text)
-					QM.addMailRecipient(text)
+				addRecipBox = QM.Config.editbox(page, 100)
+				addRecipBox:SetScript("OnEnterPressed", function()
+					QM.addMailRecipient(this:GetText())
 					addRecipBox:SetText("")
+					this:ClearFocus()
 				end)
 				addRecipBox:SetPoint("TOPLEFT", recipHdr, "BOTTOMLEFT", 0, -6)
 				local addRecipBtn = QM.Config.button(page, "Add", function()
