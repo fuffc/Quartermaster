@@ -1613,8 +1613,15 @@ function QM.Config.listEditor(parent, spec)
 		else
 			row.name:SetTextColor(1, 1, 1); row.icon:SetAlpha(1)
 		end
-		row.target:SetText(tostring(e.target or 0))
-		if row.low then row.low:SetText(tostring(e.low or 0)) end
+		-- Skip repainting a box the user is still typing in -- a refresh triggered by some
+		-- other row/control (e.g. the restock toggle) would otherwise clobber an uncommitted
+		-- edit with the last-saved value before OnEditFocusLost ever runs.
+		if row.target ~= QM.Config._focusedEditBox then
+			row.target:SetText(tostring(e.target or 0))
+		end
+		if row.low and row.low ~= QM.Config._focusedEditBox then
+			row.low:SetText(tostring(e.low or 0))
+		end
 		if row.apply then row.apply.setValue(e.apply or "none") end
 		if row.recipient then row.recipient.setValue(e.mailRecipient or "(default)") end
 		-- Track is item-intrinsic (account-wide); the gear opens only for Buff items and
@@ -1664,7 +1671,9 @@ function QM.Config.listEditor(parent, spec)
 		if row.restock then row.restock:Hide() end
 		if row.bankable then row.bankable:Hide() end
 		row.divLabel:Show()
-		row.divLabel:SetText(e.label or "")
+		if row.divLabel ~= QM.Config._focusedEditBox then
+			row.divLabel:SetText(e.label or "")
+		end
 		local st = paintState(row, e)
 		if st == "off" then row.divLabel:SetTextColor(0.5, 0.5, 0.5)
 		elseif st == "hidden" then row.divLabel:SetTextColor(0.7, 0.7, 0.7)
