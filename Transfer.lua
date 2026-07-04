@@ -1135,6 +1135,36 @@ function T.mailDumpExcess()
 	sendNext(1)
 end
 
+-- Seed the transferable list from one of this character's Tracker profiles -- e.g. a
+-- bank alt that wants everything the raid profile carries also shed to Transferable.
+-- Items already on the transferable list (by id) are left untouched, so this is safe
+-- to run repeatedly as the source profile changes. Returns the count actually added.
+function T.importFromProfile(profileName)
+	local c = QM.me
+	if not c or not c.profiles then return 0 end
+	local src = c.profiles[profileName]
+	if not src then return 0 end
+	local list = c.transferable
+	if not list then list = {}; c.transferable = list end
+	local have = {}
+	for i = 1, table.getn(list) do
+		local e = list[i]
+		if not QM.isDivider(e) then have[e.id] = true end
+	end
+	local added = 0
+	for i = 1, table.getn(src) do
+		local e = src[i]
+		if not QM.isDivider(e) and not have[e.id] then
+			table.insert(list, { id = e.id, name = e.name, icon = e.icon, quality = e.quality,
+				target = 0, bankable = true, state = "enabled" })
+			have[e.id] = true
+			added = added + 1
+		end
+	end
+	if added > 0 then QM.fire("DESIRED_CHANGED") end
+	return added
+end
+
 -- ---------------------------------------------------------------------------
 -- Mail supply: what can I personally cover of another character's shortfall?
 -- Distinct from T.plan (which answers "what do I still need") -- this answers
@@ -1323,6 +1353,7 @@ QM.registerConfigTab({
 			targetText   = "Keep",   -- floor to leave behind; sync ships everything above it
 			bankable     = true,
 			recipientText = "Mail To",
+			afterAddRowWidth = 158, -- reserves room for the Import-profile drop (150w) + its 8px gap
 
 			-- Above the list: manage the custom recipient-name pool, this character's
 			-- default recipient, and the banksync overage option.
@@ -1447,6 +1478,23 @@ QM.registerConfigTab({
 					"or mailed (Mail To, or the default above).")
 
 				return explain   -- bottom-most; the add row stacks below it
+			end,
+			-- Bulk-seed the list from a Tracker profile (T.importFromProfile), inline with
+			-- the add row rather than a whole header section for one action button. Its face
+			-- is fixed text (staticLabel): this is a one-shot action, not a persistent field,
+			-- so there's nothing to keep displaying after the pick.
+			afterAddRow = function(page, anchorBtn)
+				local importDrop = QM.Config.dropButton(page, {
+					width = 150, height = 22, menuWidth = 170,
+					staticLabel = "Import profile",
+					values = function() return QM.profileNames() end,
+					get = function() return nil end,
+					onSelect = function(v)
+						local n = T.importFromProfile(v)
+						QM.print(n .. " item" .. (n == 1 and "" or "s") .. " imported from \"" .. v .. "\"")
+					end,
+				})
+				importDrop:SetPoint("LEFT", anchorBtn, "RIGHT", 8, 0)
 			end,
 			-- No footer here: Dump Excess + the character/profile pickers live on the
 			-- Quartermaster_Mail panel instead (shown only while the mailbox is open --

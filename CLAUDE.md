@@ -138,7 +138,11 @@ Quartermaster` at the top of each file.
   `mailRecipient`. `transferableFloor(c, e)` resolves that floor for both sync paths: if
   the same item is *also* on the active tracked list, that list's `target` always wins
   over Keep, and a dual-listed item is processed only once (by the transferable pass) to
-  avoid double-counting against a stale inventory snapshot. `T.bankSync()`
+  avoid double-counting against a stale inventory snapshot. `T.importFromProfile(name)`
+  bulk-seeds the transferable list from one of this character's Tracker profiles (the
+  Transfer tab's "Import profile" drop, next to Add) — items already on the list (by id)
+  are left alone, so re-running it after the source profile changes only adds the new
+  ones. `T.bankSync()`
   (`/qm banksync`) tops up the tracked list's shortfall from the bank, then (optionally)
   banks tracked-list and transferable overage above their floors. `T.mailDumpExcess()`
   mails transferable overage to its resolved recipient, then (optionally) tracked-list
