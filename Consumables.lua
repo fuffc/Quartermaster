@@ -112,6 +112,7 @@ end
 local DEFAULT_EAT_TIME = 10
 local EAT_AURA_GRACE   = 1.5   -- secs before a missing eat aura counts as "stopped" (it needs a beat to appear)
 local EAT_TIMEOUT      = 8     -- secs past the expected eat time with no buff -> give up
+local EAT_FLASH        = 0.9   -- with no learned eat aura, how long the click-feedback blue flash shows
 
 local eatSession   -- { id, start, pre = {iconSet}, candidate = icon } or nil
 
@@ -140,17 +141,20 @@ local function startEatSession(id)
 	eatSession = { id = id, start = GetTime(), pre = helpfulBuffIcons() }
 end
 
--- Drive the active eat session each TICK: success (Well Fed up -> learn the eat time, and the
--- eat aura for THIS food if not yet known, then end) and interrupts (combat / eat aura gone
--- after the grace / timeout). The eat-aura candidate is the first new-since-click helpful buff
--- -- captured early, before Well Fed appears, so the two don't get confused.
+-- Drive the active eat session each TICK. Learn on the first Well Fed landing (the eat time,
+-- and the eat aura for THIS food if not yet known), but keep the session ALIVE past that so the
+-- blue "eating" bar persists over the Well Fed duration until the regen aura actually ends --
+-- while still sitting and eating, the eating state outranks the buff's remaining time. Ends on
+-- combat / eat aura gone after the grace / timeout. The eat-aura candidate is the first
+-- new-since-click helpful buff -- captured early, before Well Fed appears, so the two don't get
+-- confused.
 local function updateEatSession()
 	local sess = eatSession
 	if not sess then return end
 	local id = sess.id
 	local elapsed = GetTime() - sess.start
 
-	if QM.itemEffect(id, "self") then   -- Well Fed landed: success
+	if not sess.learned and QM.itemEffect(id, "self") then   -- Well Fed landed: learn once
 		if not QM.itemEatTime(id) then
 			local t = elapsed
 			if t < 2 then t = 2 elseif t > 60 then t = 60 end
@@ -159,8 +163,7 @@ local function updateEatSession()
 		if not QM.itemEatMatch(id) and sess.candidate then
 			QM.setItemEatMatch(id, "icon", sess.candidate)
 		end
-		eatSession = nil
-		return
+		sess.learned = true
 	end
 
 	if not sess.candidate then
@@ -452,20 +455,36 @@ function C.liveStatus(entry, applyOverride)
 		end
 	end
 
-	-- Food: Well Fed up -> normal duration display; else an active eat session -> a progress
-	-- bar filling toward the (learned) eat time; else nothing live, just "ready" (no cooldown).
+	-- Food: an active eat session outranks the buff -- while still sitting and eating, show the
+	-- blue "eating" bar over any remaining Well Fed time. A learned eat time fills the bar toward
+	-- it (then holds full); with no known time the bar is just full blue until the aura ends; with
+	-- no known eat aura we can't tell when eating stops, so it's only a brief blue click-flash.
+	-- Otherwise: Well Fed up -> its duration, else "ready" (no cooldown).
 	if track == "food" then
+		if eatSession and eatSession.id == id then
+			-- The eating bar can mask a Well Fed buff that is already up; stash its live state so
+			-- the expiring/lost notifications still read the real buff (they can't key off the
+			-- overridden phase). buffUp/buffLeft are NOT s.up (render must keep the eating branch).
+			local bu, btl = QM.itemEffect(id, apply)
+			s.buffUp = bu and true or false; s.buffLeft = btl
+			local et = QM.itemEatTime(id)
+			if et then
+				local left = et - (GetTime() - eatSession.start)
+				if left < 0 then left = 0 end
+				s.phase = "eating"; s.timeLeft = left; s.duration = et
+				return s
+			elseif QM.itemEatMatch(id) then
+				s.phase = "eating"; s.eatFull = true
+				return s
+			elseif (GetTime() - eatSession.start) < EAT_FLASH then
+				s.phase = "eating"; s.eatFull = true
+				return s
+			end
+		end
 		local up, tl, stacks = QM.itemEffect(id, apply)
 		if up then
 			s.phase = "buff"; s.up = true; s.timeLeft = tl; s.stacks = stacks
 			s.duration = QM.itemMaxDuration(id) or tl
-			return s
-		end
-		if eatSession and eatSession.id == id then
-			local et = QM.itemEatTime(id) or DEFAULT_EAT_TIME
-			local left = et - (GetTime() - eatSession.start)
-			if left < 0 then left = 0 end
-			s.phase = "eating"; s.timeLeft = left; s.duration = et
 			return s
 		end
 		s.phase = "ready"
@@ -623,11 +642,14 @@ local function runNotifications(data)
 			-- (item, slot) and tag the message with the hand.
 			local rid = id .. ":" .. (data[i].apply or "")
 			local suffix = data[i].tag and (" (" .. data[i].tag .. ")") or ""
-			local up = st.phase == "buff"
+			-- A food buff still counts as up while the eating bar is masking it (st.buffUp),
+			-- so re-eating over an active buff doesn't false-fire "dropped".
+			local up = st.phase == "buff" or st.buffUp
+			local left = (st.phase == "buff") and st.timeLeft or st.buffLeft
 			if up and not prevUp[rid] then QM.Notify.rearm("qm-exp-" .. rid) end   -- re-arm on (re)application
-			if up and st.timeLeft and st.timeLeft <= lowDuration() then
+			if up and left and left <= lowDuration() then
 				QM.notify(QM.Notify.label("Running low: ") .. whiteName(e) .. suffix
-					.. QM.Notify.label(" (" .. QM.fmtTime(st.timeLeft) .. " left)"),
+					.. QM.Notify.label(" (" .. QM.fmtTime(left) .. " left)"),
 					{ category = "consumableExpiring", severity = "warn",
 					  key = "qm-exp-" .. rid, cooldown = EXPIRE_NOTIFY })
 			end
@@ -1051,8 +1073,9 @@ local function paintHudRow(row, d)
 		frac = (s.duration and s.duration > 0 and s.timeLeft) and (s.timeLeft / s.duration) or 1
 		br, bg, bb = buffBarColor(s.timeLeft, low)
 	elseif s.phase == "eating" then
-		-- Fills as you eat (elapsed / eat time), the inverse of the draining buff/cd bars.
-		frac = (s.duration and s.duration > 0) and ((s.duration - s.timeLeft) / s.duration) or 0
+		-- Fills as you eat (elapsed / eat time), the inverse of the draining buff/cd bars; a
+		-- full bar when the eat time is unknown (or the brief no-aura click-flash).
+		frac = s.eatFull and 1 or ((s.duration and s.duration > 0) and ((s.duration - s.timeLeft) / s.duration) or 0)
 		br, bg, bb = EAT_BAR_COLOR[1], EAT_BAR_COLOR[2], EAT_BAR_COLOR[3]
 	elseif s.phase == "cd" then
 		frac = (s.duration and s.duration > 0) and (s.timeLeft / s.duration) or 1
@@ -1122,7 +1145,7 @@ local function paintHudRow(row, d)
 		if s.timeLeft and s.timeLeft <= low then row.time:SetTextColor(1, 0.55, 0.1)
 		else row.time:SetTextColor(0.4, 0.9, 0.4) end
 	elseif s.phase == "eating" then
-		row.time:SetText(QM.fmtTime(s.timeLeft)); row.time:SetTextColor(EAT_BAR_COLOR[1], EAT_BAR_COLOR[2], EAT_BAR_COLOR[3])
+		row.time:SetText(s.eatFull and "Eating" or QM.fmtTime(s.timeLeft)); row.time:SetTextColor(EAT_BAR_COLOR[1], EAT_BAR_COLOR[2], EAT_BAR_COLOR[3])
 	elseif s.phase == "cd" then
 		row.time:SetText(QM.fmtTime(s.timeLeft)); row.time:SetTextColor(0.85, 0.45, 0.45)
 	elseif s.phase == "stock" then

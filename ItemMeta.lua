@@ -55,10 +55,15 @@ QM.subscribe("READY", function()
 	-- inferring it from the version number -- immune to version-scheme quirks.
 	QM.caps.equippedItem = (type(GetEquippedItem) == "function")
 
+	-- TEMP DEBUG: force this cap off (ignoring real detection) to rule out ClassicAPI's
+	-- C_UnitAuras path while troubleshooting the mail-send issue. Flip to false to
+	-- restore real detection.
+	local FORCE_CUNITAURAS_OFF = true
+
 	-- Aura API from the ClassicAPI client-side patch -- NOT native, so always gate on this
 	-- cap and fall back. Gives direct spellId/timing per aura index.
-	QM.caps.cUnitAuras = (type(C_UnitAuras) == "table"
-		and type(C_UnitAuras.GetAuraDataByIndex) == "function") or false
+	QM.caps.cUnitAuras = not FORCE_CUNITAURAS_OFF and ((type(C_UnitAuras) == "table"
+		and type(C_UnitAuras.GetAuraDataByIndex) == "function") or false)
 
 	-- Nampower's per-item cooldown read. Unlike the bag-slot GetContainerItemCooldown it
 	-- reports shared CATEGORY cooldowns (e.g. one elixir putting the others on cooldown).
