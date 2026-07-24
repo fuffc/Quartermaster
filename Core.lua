@@ -224,6 +224,30 @@ function QM.findBagSlot(itemID)
 	end
 end
 
+-- bag, slot of the SMALLEST stack of itemID in the carried bags (0..4), or nil. Stack size
+-- normalises charges the way scanContainer does (a charged item -- oil, wand -- reports its
+-- count as NEGATIVE remaining charges on 1.12). Used when consuming so a nearly-depleted
+-- stack is spent before a fresh one, e.g. finishing a low-charge Mana Oil rather than
+-- opening a full one.
+function QM.findBagSlotLowest(itemID)
+	local bestBag, bestSlot, bestCount
+	for bag = 0, 4 do
+		local slots = GetContainerNumSlots(bag)
+		for slot = 1, (slots or 0) do
+			local link = GetContainerItemLink(bag, slot)
+			if link and QM.itemID(link) == itemID then
+				local _, count = GetContainerItemInfo(bag, slot)
+				count = count or 1
+				if count < 0 then count = -count end
+				if not bestCount or count < bestCount then
+					bestBag, bestSlot, bestCount = bag, slot, count
+				end
+			end
+		end
+	end
+	return bestBag, bestSlot
+end
+
 local function scanContainer(bag, inv, where)
 	local slots = GetContainerNumSlots(bag)
 	if not slots then return end

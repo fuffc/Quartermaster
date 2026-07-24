@@ -201,7 +201,7 @@ end
 --             use (the working sequence in SuperCleveRoidMacros' /applymain), so no defer needed.
 --   self   -- used directly on the player.
 function C.use(itemID, apply)
-	local bag, slot = QM.findBagSlot(itemID)
+	local bag, slot = QM.findBagSlotLowest(itemID)
 	if not bag then
 		QM.print("none of that consumable in your bags")
 		return false
