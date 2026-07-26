@@ -2,7 +2,7 @@
 ## Title: Quartermaster
 ## Notes: Personal raid-prep helper: consumables, reagents, repair, and cross-character stocking
 ## Author: Fuff
-## Version: 0.2.1
+## Version: 0.2.2
 ## SavedVariables: QuartermasterDB
 
 Core.lua
