@@ -526,32 +526,39 @@ end
 -- each time was the bulk of the addon's steady-state GC churn. reclaimDescs (called at the
 -- top of each build) returns the previous paint's tables to the free lists; the descriptors
 -- and their statuses are only ever read within the same synchronous paint, so reuse is safe.
+-- Lengths are tracked explicitly rather than via table.getn: these arrays are cleared by
+-- direct `x[i] = nil` (never table.remove), which leaves the stored `n` stale on 1.12, so a
+-- later table.insert/table.getn would read/append past nil holes and crash (see MEMORY).
 local descFree, descUsed, statusFree = {}, {}, {}
+local nDescFree, nDescUsed, nStatusFree = 0, 0, 0
 
 local function reclaimDescs()
-	for i = table.getn(descUsed), 1, -1 do
+	for i = nDescUsed, 1, -1 do
 		local d = descUsed[i]
 		descUsed[i] = nil
-		if d.status then table.insert(statusFree, d.status); d.status = nil end
+		if d.status then
+			nStatusFree = nStatusFree + 1; statusFree[nStatusFree] = d.status; d.status = nil
+		end
 		d.entry, d.apply, d.tag = nil, nil, nil
 		d.divider, d.wall, d.header, d.label = nil, nil, nil, nil
-		table.insert(descFree, d)
+		nDescFree = nDescFree + 1; descFree[nDescFree] = d
 	end
+	nDescUsed = 0
 end
 
 local function acquireDesc()
-	local n = table.getn(descFree)
 	local d
-	if n > 0 then d = descFree[n]; descFree[n] = nil else d = {} end
-	table.insert(descUsed, d)
+	if nDescFree > 0 then d = descFree[nDescFree]; descFree[nDescFree] = nil; nDescFree = nDescFree - 1
+	else d = {} end
+	nDescUsed = nDescUsed + 1; descUsed[nDescUsed] = d
 	return d
 end
 
 local function pushItem(out, e, apply, tag)
 	local d = acquireDesc()
-	local n = table.getn(statusFree)
 	local s
-	if n > 0 then s = statusFree[n]; statusFree[n] = nil else s = {} end
+	if nStatusFree > 0 then s = statusFree[nStatusFree]; statusFree[nStatusFree] = nil; nStatusFree = nStatusFree - 1
+	else s = {} end
 	d.entry, d.apply, d.tag, d.status = e, apply, tag, s
 	C.liveStatus(e, apply, s)
 	table.insert(out, d)
