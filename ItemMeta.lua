@@ -278,20 +278,31 @@ function QM.itemMeta(id)
 	return m
 end
 
+-- One metadata field with the same override-over-seed precedence as itemMeta, but WITHOUT
+-- allocating the merged table -- the single-field readers below (and itemMatchEffective) run
+-- several times per HUD row per paint, so a per-call throwaway table is real GC pressure.
+local function metaField(id, field)
+	local saved = QM.db and QM.db.items and QM.db.items[id]
+	if saved and saved[field] ~= nil then return saved[field] end
+	local seed = SEED[id]
+	if seed then return seed[field] end
+	return nil
+end
+
 -- Convenience single-field readers.
-function QM.itemTrack(id)       return QM.itemMeta(id).track end
-function QM.itemMatch(id)       return QM.itemMeta(id).match end
+function QM.itemTrack(id)       return metaField(id, "track") or QM.TRACK_STOCK end
+function QM.itemMatch(id)       return metaField(id, "match") end
 
 -- Effect duration in seconds: explicit (override/seed) wins, else the value parsed from the
 -- item's tooltip "Use:" line (QM.tooltipDuration), else nil. The parsed value is derived, never
 -- persisted -- it backstops items intentionally left on auto so their HUD bar still scales right.
 function QM.itemMaxDuration(id)
-	local d = QM.itemMeta(id).maxDuration
+	local d = metaField(id, "maxDuration")
 	if d then return d end
 	return QM.tooltipDuration(id)
 end
-function QM.itemEatTime(id)     return QM.itemMeta(id).eatTime end
-function QM.itemEatMatch(id)    return QM.itemMeta(id).eatMatch end
+function QM.itemEatTime(id)     return metaField(id, "eatTime") end
+function QM.itemEatMatch(id)    return metaField(id, "eatMatch") end
 
 -- SuperWoW's GetPlayerBuffID returns the buff's spell id as a SIGNED 16-bit int, so any
 -- id above 32767 comes back negative; undo that wrap. nil without SuperWoW / for an empty
@@ -411,16 +422,18 @@ end
 --   self/target -- the explicit override/seed match, else a derived buff-icon default (the buff
 --             icon equals the item icon for most elixirs/flasks/potions).
 function QM.itemMatchEffective(id, apply)
-	local meta = QM.itemMeta(id)
+	local match = metaField(id, "match")
 	if isWeaponApply(apply) then
-		if meta.match and (meta.match.by == "enchantid" or meta.match.by == "enchantname") then
-			return meta.match
+		if match and (match.by == "enchantid" or match.by == "enchantname") then
+			return match
 		end
 		return nil
 	end
-	if meta.match then return meta.match end
-	if (meta.track == QM.TRACK_BUFF or meta.track == QM.TRACK_FOOD) and meta.icon then
-		return { by = "icon", value = meta.icon }
+	if match then return match end
+	local track = metaField(id, "track") or QM.TRACK_STOCK
+	if track == QM.TRACK_BUFF or track == QM.TRACK_FOOD then
+		local icon = metaField(id, "icon")
+		if icon then return { by = "icon", value = icon } end
 	end
 	return nil
 end
@@ -448,11 +461,13 @@ end
 -- ---- effect-present probes (shared tooltip/aura scan helpers) -----------------
 local scanTip
 
--- Inventory slot ids the apply mode covers (16 main hand, 17 off hand).
+-- Inventory slot ids the apply mode covers (16 main hand, 17 off hand). Constant tables --
+-- read, never mutated by callers -- so the per-row effect scan doesn't allocate one each paint.
+local SLOTS_MH, SLOTS_OH, SLOTS_BOTH = { 16 }, { 17 }, { 16, 17 }
 local function weaponSlots(apply)
-	if apply == "oh" then return { 17 } end
-	if apply == "mh" then return { 16 } end
-	return { 16, 17 }
+	if apply == "oh" then return SLOTS_OH end
+	if apply == "mh" then return SLOTS_MH end
+	return SLOTS_BOTH
 end
 
 local function getScanTip()
@@ -659,10 +674,9 @@ function QM.equippedTempEnchantId(slot)
 	local wantId
 	local link = GetInventoryItemLink and GetInventoryItemLink("player", slot)
 	if link then local _, _, s = string.find(link, "item:(%d+)"); wantId = tonumber(s) end
-	local cands = { slot - 1, slot }
 	local fallback
 	for i = 1, 2 do
-		local info = GetEquippedItem("player", cands[i])
+		local info = GetEquippedItem("player", (i == 1) and (slot - 1) or slot)
 		if info and info.itemId then
 			if wantId then
 				if info.itemId == wantId then return info.tempEnchantId end

@@ -439,11 +439,17 @@ end
 -- The bag count is always filled in (the prep view + low-stock tint read it).
 -- applyOverride lets a split MH/OH HUD row read just its own weapon slot (the entry itself
 -- still carries the "weapon" = both mode).
-function C.liveStatus(entry, applyOverride)
+-- `out`, when given, is a table to fill in place (fields reset here) instead of allocating a
+-- fresh one -- the per-paint HUD build pools these (see activeBuffs). Callers that want a
+-- one-shot table (a click/hover probe) just omit it.
+function C.liveStatus(entry, applyOverride, out)
 	local id, apply = entry.id, applyOverride or entry.apply or "self"
 	local track = QM.itemTrack(id)
 	local bags = QM.itemCount(id)
-	local s = { track = track, phase = "none", bags = bags }
+	local s = out or {}
+	s.track, s.phase, s.bags = track, "none", bags
+	s.up, s.timeLeft, s.stacks, s.duration = nil, nil, nil, nil
+	s.buffUp, s.buffLeft, s.eatFull = nil, nil, nil
 	if track == "stock" then s.phase = "stock"; return s end
 
 	if track == "buff" then
@@ -515,6 +521,42 @@ local function offHandIsWeapon()
 	return loc ~= nil and string.find(loc, "WEAPON") ~= nil
 end
 
+-- Row-descriptor + status tables are pooled across paints: the HUD rebuilds this stream
+-- twice a second (and faster while a short cooldown animates), and a from-scratch 2*N tables
+-- each time was the bulk of the addon's steady-state GC churn. reclaimDescs (called at the
+-- top of each build) returns the previous paint's tables to the free lists; the descriptors
+-- and their statuses are only ever read within the same synchronous paint, so reuse is safe.
+local descFree, descUsed, statusFree = {}, {}, {}
+
+local function reclaimDescs()
+	for i = table.getn(descUsed), 1, -1 do
+		local d = descUsed[i]
+		descUsed[i] = nil
+		if d.status then table.insert(statusFree, d.status); d.status = nil end
+		d.entry, d.apply, d.tag = nil, nil, nil
+		d.divider, d.wall, d.header, d.label = nil, nil, nil, nil
+		table.insert(descFree, d)
+	end
+end
+
+local function acquireDesc()
+	local n = table.getn(descFree)
+	local d
+	if n > 0 then d = descFree[n]; descFree[n] = nil else d = {} end
+	table.insert(descUsed, d)
+	return d
+end
+
+local function pushItem(out, e, apply, tag)
+	local d = acquireDesc()
+	local n = table.getn(statusFree)
+	local s
+	if n > 0 then s = statusFree[n]; statusFree[n] = nil else s = {} end
+	d.entry, d.apply, d.tag, d.status = e, apply, tag, s
+	C.liveStatus(e, apply, s)
+	table.insert(out, d)
+end
+
 -- The HUD row stream, in list order: item elements { entry=, status=, apply=, tag= } for
 -- every SHOWN entry (buff/cd/food timer rows AND stock count rows), interleaved with divider
 -- elements { divider=true, wall=true, header=, label=, entry= } for every ACTIVE divider (a
@@ -524,20 +566,20 @@ end
 -- with a tag; single-weapon or non-enchant items stay one row. Unordered within segments;
 -- C.orderTracked applies the row order and empty headers are pruned at render.
 function C.activeBuffs()
+	reclaimDescs()
 	local out = {}
 	local list = QM.me and QM.me.consumables
 	if not list then return out end
 	local dw = offHandIsWeapon()
-	local function push(e, apply, tag)
-		table.insert(out, { entry = e, status = C.liveStatus(e, apply), apply = apply, tag = tag })
-	end
+	local function push(e, apply, tag) pushItem(out, e, apply, tag) end
 	for i = 1, table.getn(list) do
 		local e = list[i]
 		if QM.isDivider(e) then
 			local st = QM.itemState(e)
 			if st ~= "off" then
-				table.insert(out, { divider = true, wall = true, header = (st == "enabled"),
-					label = e.label, entry = e })
+				local d = acquireDesc()
+				d.divider, d.wall, d.header, d.label, d.entry = true, true, (st == "enabled"), e.label, e
+				table.insert(out, d)
 			end
 		elseif e and e.id and QM.itemShown(e) then
 			local tr = QM.itemTrack(e.id)
@@ -562,6 +604,9 @@ end
 --   active   -- buff-up rows first (list order within the segment), then the rest.
 --   duration -- buff-up rows by time left (most first, least at the bottom), then the rest.
 local function isUp(d) return d.status.phase == "buff" end
+local function byTimeLeftDesc(a, b)
+	return (a.status.timeLeft or 1e9) > (b.status.timeLeft or 1e9)
+end
 function C.orderTracked(data)
 	local mode = (QM.db and QM.db.options.rowOrder) or "config"
 	local out, seg = {}, {}
@@ -573,7 +618,7 @@ function C.orderTracked(data)
 				if isUp(seg[i]) then table.insert(up, seg[i]) else table.insert(rest, seg[i]) end
 			end
 			if mode == "duration" then
-				table.sort(up, function(a, b) return (a.status.timeLeft or 1e9) > (b.status.timeLeft or 1e9) end)
+				table.sort(up, byTimeLeftDesc)
 			end
 			local merged = {}
 			for i = 1, table.getn(up)   do table.insert(merged, up[i])   end
