@@ -1,8 +1,8 @@
-## Interface: 11501
+## Interface: 11200
 ## Title: Quartermaster
 ## Notes: Personal raid-prep helper: consumables, reagents, repair, and cross-character stocking
 ## Author: Fuff
-## Version: 0.2.2
+## Version: 0.2.3
 ## SavedVariables: QuartermasterDB
 
 Core.lua
