@@ -195,6 +195,9 @@ function C.use(itemID, apply)
 		QM.print("none of that consumable in your bags")
 		return false
 	end
+	-- Snapshot what is already up BEFORE using, so the capture-on-use below can tell which buff
+	-- this item added (the self/target counterpart of the weapon path's enchant diff).
+	local beforeBuffs = QM.playerBuffIconSet()
 	if apply == C.APPLY_TARGET then
 		local hadTarget = UnitExists("target")
 		local wasSelf   = hadTarget and UnitIsUnit("target", "player")
@@ -219,7 +222,19 @@ function C.use(itemID, apply)
 	else
 		UseContainerItem(bag, slot)
 	end
-	if QM.itemTrack(itemID) == QM.TRACK_FOOD then startEatSession(itemID) end
+	-- Capture-on-use. Almost every seed entry carries no explicit match rule and leans on the
+	-- derived "the buff icon equals the item icon" default, which is simply false for scrolls,
+	-- food, jujus and anything whose buff art differs from its item art -- those rows would
+	-- never light up, with nothing in the addon to correct them. Watch for the new buff
+	-- instead. Food only lands Well Fed after the eat session, hence the longer window.
+	local track = QM.itemTrack(itemID)
+	if apply ~= C.APPLY_WEAPON and apply ~= C.APPLY_MH and apply ~= C.APPLY_OH
+	   and (track == QM.TRACK_BUFF or track == QM.TRACK_FOOD)
+	   and not QM.itemValidated(itemID) then
+		C.pendingBuffLearn = { id = itemID, before = beforeBuffs,
+			deadline = GetTime() + (track == QM.TRACK_FOOD and 45 or 12) }
+	end
+	if track == QM.TRACK_FOOD then startEatSession(itemID) end
 	C.kickFast(1)   -- animate the resulting (short) cooldown smoothly from the click
 	return true
 end
@@ -267,6 +282,50 @@ function C.prepPlanPrint()
 	end
 	QM.print("prep: '" .. QM.activeProfile() .. "' -- " .. table.getn(rows) .. " item(s) short")
 	for i = 1, table.getn(rows) do QM.print("  " .. prepRowText(rows[i])) end
+end
+
+-- "Interface\\Icons\\INV_Potion_32" -> "INV_Potion_32", so a report line stays readable.
+local function shortIcon(path)
+	if not path then return "?" end
+	local _, _, tail = string.find(path, "([^\\]+)$")
+	return tail or path
+end
+
+-- /qm buffs -- the answer to "this buff is up, so why is the row not green?". Lists every buff
+-- on the player (name / icon / spell id), then each tracked buff+food row with the match rule
+-- actually in force and whether it resolves right now. A row reading NO RULE or "not up" while
+-- its buff is plainly listed above means the rule points at the wrong art: use the item once to
+-- let capture-on-use adopt it, or set it by hand in the row's gear popup.
+function C.buffReport()
+	local buffs = QM.playerBuffList()
+	QM.print(table.getn(buffs) .. " buff(s) up:")
+	for i = 1, table.getn(buffs) do
+		local b = buffs[i]
+		QM.print("  " .. (b.name or "(unnamed)") .. "  icon=" .. shortIcon(b.icon) ..
+			(b.id and ("  id=" .. b.id) or ""))
+	end
+	local list = (QM.me and QM.me.consumables) or {}
+	QM.print("tracked buff rows on '" .. QM.activeProfile() .. "':")
+	local shown = 0
+	for i = 1, table.getn(list) do
+		local e = list[i]
+		if not QM.isDivider(e) and e.id and QM.itemActive(e) then
+			local tr = QM.itemTrack(e.id)
+			if tr == QM.TRACK_BUFF or tr == QM.TRACK_FOOD then
+				shown = shown + 1
+				local apply = e.apply or "self"
+				local m = QM.itemMatchEffective(e.id, apply)
+				local rule = "NO RULE"
+				if m then
+					rule = m.by .. "=" .. ((m.by == "icon") and shortIcon(m.value) or tostring(m.value))
+				end
+				QM.print("  " .. (e.name or ("item " .. e.id)) .. ": " .. rule ..
+					"  [" .. QM.itemMatchStatus(e.id, apply) ..
+					", " .. (QM.itemEffect(e.id, apply) and "ACTIVE" or "not up") .. "]")
+			end
+		end
+	end
+	if shown == 0 then QM.print("  (none -- these rows are all Stock/CD tracked)") end
 end
 
 -- Throttled vendor buying, one purchase per tick like QuickStash's Seller -- bulk vendor
@@ -1394,6 +1453,19 @@ QM.subscribe("TICK", function()
 	local data = C.activeBuffs()
 	runNotifications(data)
 	renderHUD(data)
+end)
+
+-- Process a pending capture-on-use (see C.use): adopt whichever buff appeared since the item
+-- was used, retrying each tick until one lands or the window closes. Clears early once the rule
+-- validates -- validateTick confirms it on the very next pass, the buff being up by then.
+QM.subscribe("TICK", function()
+	local p = C.pendingBuffLearn
+	if not p then return end
+	if QM.itemValidated(p.id) or GetTime() > p.deadline then C.pendingBuffLearn = nil; return end
+	if QM.learnSelfBuff(p.id, p.before) then
+		C.pendingBuffLearn = nil
+		QM.fire("ITEM_META_CHANGED")
+	end
 end)
 
 -- Process a pending capture-on-apply (see C.use): once the enchant we just applied has landed

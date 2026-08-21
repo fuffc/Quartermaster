@@ -879,10 +879,12 @@ SlashCmdList["QUARTERMASTER"] = function(rawmsg)
 		if QM.Transfer and QM.Transfer.mailTest then
 			QM.Transfer.mailTest(nameArg ~= "" and nameArg or nil, delayArg)
 		end
+	elseif msg == "buffs" then
+		if QM.Consumables and QM.Consumables.buffReport then QM.Consumables.buffReport() end
 	elseif msg == "" or msg == "config" then
 		if QM.toggleConfig then QM.toggleConfig() else QM.print("config panel not loaded") end
 	else
-		QM.print("commands: /qm (config)  |  /qm lock  |  /qm unlock  |  /qm show  |  /qm hide  |  /qm banksync  |  /qm prep  |  /qm mailsync")
+		QM.print("commands: /qm (config)  |  /qm lock  |  /qm unlock  |  /qm show  |  /qm hide  |  /qm banksync  |  /qm prep  |  /qm buffs  |  /qm mailsync")
 	end
 end
 
