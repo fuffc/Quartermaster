@@ -92,7 +92,7 @@ clone.
    consumables with a real up-time, a **Low** warning threshold.
 4. Reload your UI (or just wait a moment) — the tracker HUD appears and starts
    showing your list. Left-click a row in the raid to consume that item.
-5. Got a bank alt with your reagents? Open its bank, run **`/qm banksync`** on the
+5. Got a bank alt with your reagents? Open its bank, run **`/qm restock`** on the
    character that needs stock, and it'll pull as much of its shortfall out of the open
    bank as is there — or open your mailbox and use the **Quartermaster_Mail** panel to
    mail stock across characters.
@@ -107,7 +107,8 @@ config panel.
 | `/qm` or `/qm config` | Toggle the config panel. |
 | `/qm lock` / `/qm unlock` | Lock or unlock all moveable frames (HUD, notification strip) against dragging. |
 | `/qm show` / `/qm hide` | Show or hide the tracker HUD. |
-| `/qm banksync` | Top up this character's tracked-list shortfall from an **open bank**, then (by default) bank any tracked-list overage and any bankable item on the Transfer list. Requires the bank window open. Also reachable without typing: the **Restock** button above the bank frame, or a key binding (*Key Bindings → Quartermaster → Restock tracked consumables from bank*). |
+| `/qm restock` | Top up this character's tracked-list shortfall from an **open bank**, then (by default) bank any tracked-list overage and any bankable item on the Transfer list. Requires the bank window open. Also reachable without typing: the **Restock** button above the bank frame, or a key binding (*Key Bindings → Quartermaster → Restock tracked consumables from bank*). |
+| `/qm banksync` | The original name for `/qm restock`. Still works, and always will. |
 | `/qm buffs` | Print every buff currently on you (name, icon, spell id) beside each tracked row's match rule and whether it resolves right now. The diagnostic for "the buff is up, so why is that row grey?". |
 | `/qm presets` | List the built-in role presets. |
 | `/qm prep` | Print the active list's shortfall to chat — what's short vs. Target, and how much of that is sitting in your bank or on other characters. Same report as the Tracker tab's **Prep** button. |
@@ -199,13 +200,13 @@ mailbox is actually open.
   faction, so this is a manually maintained list alongside characters Quartermaster
   already knows about), each removable with its **x** button.
 - **Default recipient** drop — the fallback for any row that doesn't set its own.
-- **Also bank tracked-list overage on `/qm banksync`** / **Also mail tracked-list
+- **Also bank tracked-list overage on `/qm restock`** / **Also mail tracked-list
   overage to the default recipient** toggles — an item you track for prep on the
   Tracker tab, once you're carrying more than its Target, can also be swept up by these
   two transfer actions without needing a separate Transfer-list entry.
 - The list itself, using **Keep** in place of Target (the floor to leave behind — sync
   actions ship everything held above it) and a **Bankable** toggle in place of the
-  restock coin (does `/qm banksync` bank this item's excess?). No Track/Use columns and
+  restock coin (does `/qm restock` bank this item's excess?). No Track/Use columns and
   no category dividers here — every row is a plain "ship the excess" instruction, and a
   **Mail To** picker replaces the Use column.
 
@@ -243,7 +244,7 @@ Each row, left to right:
   gold/green when on. The restock coin opts this item into vendor auto-buying (up to
   Target, whenever you're at a merchant that sells it) independently of its Use mode —
   useful for a food you both eat *and* keep restocked. The bankable icon opts this item
-  into `/qm banksync`'s bank-deposit pass.
+  into `/qm restock`'s bank-deposit pass.
 
 **Adding items:** shift-click an item link into the "Add item" box, drag an item onto
 the box or directly onto the list, or type a name/ID (an inline greyed ghost shows the

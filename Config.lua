@@ -814,7 +814,7 @@ end
 -- Bankable toggle (Transfer tab only), the same right-of-Target slot restockButton uses on
 -- the Tracker tab (the two never appear on the same list, so they share RESTOCK_W/GAP).
 -- A bag glyph tinted green when the entry's excess (bag qty above Keep) is OK to bank on
--- /qm banksync, grey otherwise.
+-- /qm restock, grey otherwise.
 local BANKABLE_ON  = { 0.30, 0.85, 0.35 }
 local BANKABLE_OFF = { 0.45, 0.45, 0.45 }
 local function bankableButton(parent, onClick)
@@ -831,7 +831,7 @@ local function bankableButton(parent, onClick)
 		this:SetBackdropBorderColor(0.9, 0.8, 0.2, 1)
 		GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
 		GameTooltip:AddLine(this.on and "Bankable: ON" or "Bankable: OFF")
-		GameTooltip:AddLine("OK to bank this item's excess on /qm banksync", 0.6, 0.6, 0.6)
+		GameTooltip:AddLine("OK to bank this item's excess on /qm restock", 0.6, 0.6, 0.6)
 		GameTooltip:AddLine("Click to toggle", 0.5, 0.5, 0.5)
 		GameTooltip:Show()
 	end)

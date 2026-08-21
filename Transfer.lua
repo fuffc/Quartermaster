@@ -1,7 +1,7 @@
 -- Quartermaster -- Transfer
 -- Moves stock both INTO and OUT OF the current character's carried bags:
 --   * from/to the BANK while the bank is open -- top up shortfalls toward `target`,
---     or bank excess (/qm banksync), filling existing partial stacks first.
+--     or bank excess (/qm restock), filling existing partial stacks first.
 --   * via MAIL -- one stack per mail (1.12 allows a single attachment), sequenced
 --     on MAIL_SEND_SUCCESS. Either supplying another character's shortfall, or
 --     dumping the transferable list's excess to a configured recipient.
@@ -266,7 +266,7 @@ end
 -- Forward declares: the paced/settled action engine, the generic per-item
 -- sequencer, and cancellation both live further down (alongside the Prep frame /
 -- Mailer), but T.fromBank/T.toBank/T.bankSync and the Mailer's MAIL_CLOSED handler
--- all need them here. `bankSyncing` guards against a second /qm banksync overlapping
+-- all need them here. `bankSyncing` guards against a second /qm restock overlapping
 -- an in-progress one, the same idea as Mailer.sending.
 local runItemActions
 local runItemsSequential
@@ -348,7 +348,7 @@ local function inTransferableList(c, id)
 end
 
 -- ---------------------------------------------------------------------------
--- /qm banksync -- top up tracked-list shortfalls from the bank, then (optionally)
+-- /qm restock -- top up tracked-list shortfalls from the bank, then (optionally)
 -- bank tracked-list overage and everything bankable in the transferable list.
 -- ---------------------------------------------------------------------------
 -- Runs `items` ({ {id=,name=,amount=}, ... }) one at a time through `mover`
@@ -371,7 +371,7 @@ end
 
 function T.bankSync()
 	if not QM.bankOpen then QM.print("open your bank first"); return end
-	if bankSyncing then QM.print("banksync already running"); return end
+	if bankSyncing then QM.print("restock already running"); return end
 	local c = QM.me
 	if not c then return end
 
@@ -415,7 +415,7 @@ function T.bankSync()
 			bankSyncing = false
 			setStatus(nil)
 			QM.scanInventory()
-			QM.print("banksync: topped up " .. topped .. ", banked " .. banked)
+			QM.print("restock: topped up " .. topped .. ", banked " .. banked)
 		end)
 	end)
 end
@@ -1616,7 +1616,7 @@ QM.registerConfigTab({
 			afterAddRowWidth = 158, -- reserves room for the Import-profile drop (150w) + its 8px gap
 
 			-- Above the list: manage the custom recipient-name pool, this character's
-			-- default recipient, and the banksync overage option.
+			-- default recipient, and the restock overage option.
 			header = function(page, title)
 				local RECIPIENT_ROW_H = 20
 				local RECIPIENT_LIST_W = 150
@@ -1704,7 +1704,7 @@ QM.registerConfigTab({
 				QM.subscribe("DESIRED_CHANGED", function() defaultDrop.setValue((QM.me and QM.me.defaultMailRecipient) or "(none)") end)
 
 				local overageCheck = QM.Config.check(page,
-					"Also bank tracked-list overage on /qm banksync", 0, 0,
+					"Also bank tracked-list overage on /qm restock", 0, 0,
 					function(v) QM.db.options.transfer.dumpTrackedOverage = v end,
 					function() return QM.db.options.transfer.dumpTrackedOverage ~= false end)
 				overageCheck:ClearAllPoints()
@@ -1734,7 +1734,7 @@ QM.registerConfigTab({
 				explain:SetJustifyH("LEFT")
 				explain:SetTextColor(0.7, 0.7, 0.7)
 				explain:SetText("Items below are shed rather than restocked: Keep is the floor left on " ..
-					"this character -- anything held above it can be banked (Bankable, /qm banksync) " ..
+					"this character -- anything held above it can be banked (Bankable, /qm restock) " ..
 					"or mailed (Mail To, or the default above).")
 
 				return explain   -- bottom-most; the add row stacks below it

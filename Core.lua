@@ -77,7 +77,7 @@ local defaults = {
 		rowOrder        = "config", -- tracker row order: "config" | "active" | "duration"
 		guardReuse      = true, -- block a HUD consume while the buff is up above the low threshold (shift forces)
 		transfer = {
-			dumpTrackedOverage = true, -- /qm banksync also banks tracked-list qty above target
+			dumpTrackedOverage = true, -- /qm restock also banks tracked-list qty above target
 			mailTrackedOverage = true, -- Dump Excess also mails tracked-list qty above target
 			                           -- to the default mail recipient, when one is set
 		},
@@ -494,7 +494,7 @@ function QM.setRestock(kind, index)
 	QM.fire("DESIRED_CHANGED")
 end
 
--- Transferable-list opt-in: OK to bank this item's excess (Transfer.lua's /qm banksync).
+-- Transferable-list opt-in: OK to bank this item's excess (Transfer.lua's /qm restock).
 function QM.setBankable(kind, index)
 	local list = QM.me and QM.me[kind]
 	local e = list and list[index]
@@ -873,7 +873,9 @@ SlashCmdList["QUARTERMASTER"] = function(rawmsg)
 		if QM.setHudHidden then QM.setHudHidden(false) end
 	elseif msg == "hide" then
 		if QM.setHudHidden then QM.setHudHidden(true) end
-	elseif msg == "banksync" then
+	-- "restock" is the name this action goes by everywhere else (the bank-frame button, the
+	-- key binding); "banksync" is the original and stays a working alias.
+	elseif msg == "restock" or msg == "banksync" then
 		if QM.Transfer and QM.Transfer.bankSync then QM.Transfer.bankSync() end
 	elseif msg == "prep" then
 		if QM.Consumables and QM.Consumables.prepPlanPrint then QM.Consumables.prepPlanPrint() end
@@ -909,7 +911,7 @@ SlashCmdList["QUARTERMASTER"] = function(rawmsg)
 	elseif msg == "" or msg == "config" then
 		if QM.toggleConfig then QM.toggleConfig() else QM.print("config panel not loaded") end
 	else
-		QM.print("commands: /qm (config)  |  /qm lock  |  /qm unlock  |  /qm show  |  /qm hide  |  /qm banksync  |  /qm prep  |  /qm buffs  |  /qm mailsync")
+		QM.print("commands: /qm (config)  |  /qm lock  |  /qm unlock  |  /qm show  |  /qm hide  |  /qm restock  |  /qm prep  |  /qm buffs  |  /qm presets  |  /qm mailsync")
 	end
 end
 

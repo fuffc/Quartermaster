@@ -22,7 +22,7 @@ otherwise spread across several addons, with full per-character control. Four pi
    **has**; utility functions then move stock into the raid char's bags, either by
    **mailing** from an alt or **withdrawing from the bank**, always **filling existing
    partial stacks first** — and the reverse: a per-character **Transferable** list
-   (`kind="transferable"`) of items to proactively shed, via `/qm banksync` (bank) or
+   (`kind="transferable"`) of items to proactively shed, via `/qm restock` (bank) or
    the **Transfer** config tab's mail actions (dump excess to a recipient, or supply
    another character's shortfall).
 
@@ -35,7 +35,7 @@ otherwise spread across several addons, with full per-character control. Four pi
 > readers + progress-bar rows, stock count gauges, divider headers + the expiring/lost
 > notification triggers), reagent restock-to-cap, the prep math (`T.plan`), the bank
 > stack-fill mover (both directions), the **Transfer** tab (transferable list,
-> `/qm banksync`, mail dump-excess, mail supply-another-character), and the TurtleMail
+> `/qm restock`, mail dump-excess, mail supply-another-character), and the TurtleMail
 > compat path (native flow via `TurtleMail.orig`, per-item retries), the **in-raid repair
 > status row** (shares an edge with the profile-switch row rather than displacing it), the
 > low-repair / low-stock notification triggers, and the Tracker tab's read-only **prep
@@ -183,7 +183,7 @@ Quartermaster` at the top of each file.
   Transfer tab's "Import profile" drop, next to Add) — items already on the list (by id)
   are left alone, so re-running it after the source profile changes only adds the new
   ones. `T.bankSync()`
-  (`/qm banksync`) tops up the tracked list's shortfall from the bank, then (optionally)
+  (`/qm restock`, alias `/qm banksync`) tops up the tracked list's shortfall from the bank, then (optionally)
   banks tracked-list and transferable overage above their floors — asynchronously, one
   item at a time via `runItemsSequential`, guarded against overlap by `bankSyncing` (the
   same idea as `Mailer.sending`) and cancelled on `BANKFRAME_CLOSED` the way mail cancels
@@ -286,7 +286,7 @@ QuartermasterDB = {
               hudHidden, hudHeader, showTargetCount, showItemName, abbreviateNames, hudOutline,
               barTexture,                          -- index into Consumables' BAR_TEXTURES
               buffLowDuration, showBuffIds, guardReuse,
-              transfer = { dumpTrackedOverage,      -- /qm banksync also banks tracked overage
+              transfer = { dumpTrackedOverage,      -- /qm restock also banks tracked overage
                            mailTrackedOverage },     -- Dump Excess also mails tracked overage
               notify = { enabled, duration, fontSize,
                          lowRepair, lowConsumable,   -- per-category gates
@@ -316,7 +316,7 @@ QuartermasterDB = {
       transferable = { { id, name, icon, quality, target, state, bankable, mailRecipient }, ... },
                         -- Transfer.lua's proactive-shed list. `target` repurposed as Keep
                         -- (floor left behind, default 0); no `low`. `bankable` gates
-                        -- /qm banksync; `mailRecipient` overrides defaultMailRecipient below.
+                        -- /qm restock; `mailRecipient` overrides defaultMailRecipient below.
       defaultMailRecipient,   -- this character's fallback Transfer mail recipient
       mailTarget = { char, profile },   -- last "supply another character" pick; backs both
                         -- the Quartermaster_Mail panel and /qm mailsync <character> [list].
@@ -345,10 +345,11 @@ the prep view still shows where stock is. `itemID` comes from parsing the item l
 ## Config (`/qm`)
 
 **Slash is intentionally minimal**: `/qm` / `/qm config` toggles the panel; `/qm lock` /
-`/qm unlock`; `/qm show` / `/qm hide` toggle the tracker HUD; `/qm banksync` runs
-`QM.Transfer.bankSync()` (needs the bank open — the **Restock** button above the bank
-frame and the `QUARTERMASTER_RESTOCK` key binding reach the same call without typing, and
-the button's tooltip previews what it would pull via `T.bankPreview`); `/qm prep` prints
+`/qm unlock`; `/qm show` / `/qm hide` toggle the tracker HUD; `/qm restock` (alias
+`/qm banksync`, the original name, kept working) runs `QM.Transfer.bankSync()` — needs the
+bank open; the **Restock** button above the bank frame and the `QUARTERMASTER_RESTOCK` key
+binding reach the same call without typing, and the button's tooltip previews what it
+would pull via `T.bankPreview`; `/qm prep` prints
 the active tracked list's shortfall (`C.prepPlanPrint`, backed by `T.plan`) to chat, one
 line per short item — the same report the Tracker tab's **Prep** button shows in a
 read-only dialog; `/qm buffs` prints every buff on the player beside each tracked row's
