@@ -10,6 +10,7 @@ Profiles.lua
 ItemDB.lua
 ItemMeta.lua
 Consumables.lua
+Presets.lua
 Repair.lua
 Transfer.lua
 Notify.lua

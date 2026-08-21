@@ -902,6 +902,10 @@ SlashCmdList["QUARTERMASTER"] = function(rawmsg)
 		end
 	elseif msg == "buffs" then
 		if QM.Consumables and QM.Consumables.buffReport then QM.Consumables.buffReport() end
+	elseif msg == "presets" then
+		local names = QM.presetNames and QM.presetNames() or {}
+		QM.print("presets (Tracker tab -> Profile drop):")
+		for i = 1, table.getn(names) do QM.print("  " .. names[i]) end
 	elseif msg == "" or msg == "config" then
 		if QM.toggleConfig then QM.toggleConfig() else QM.print("config panel not loaded") end
 	else

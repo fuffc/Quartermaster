@@ -237,6 +237,22 @@ local SEED = {
 	[8423]  = { track = "buff", maxDuration = 3600, icon = "Interface\\Icons\\inv_potion_32" },   -- Cerebral Cortex Compound
 	[9088]  = { track = "buff", maxDuration = 1800, icon = "Interface\\Icons\\INV_Potion_28" },   -- Gift of Arthas
 	[10305] = { track = "buff", maxDuration = 1800, icon = "Interface\\Icons\\INV_Scroll_07" },   -- Scroll of Protection IV
+	-- Preset items (see Presets.lua) that had no entry. No `icon` here on purpose: the buff
+	-- art differs from the item art for several of these, and a guessed icon is a rule that
+	-- silently never matches -- capture-on-use learns the real one the first time it is used.
+	[10309] = { track = "buff", maxDuration = 1800 }, -- Scroll of Agility IV
+	[8951]  = { track = "buff", maxDuration = 3600 }, -- Elixir of Greater Defense
+	[8411]  = { track = "buff", maxDuration = 3600 }, -- Lung Juice Cocktail
+	[8424]  = { track = "buff", maxDuration = 3600 }, -- Gizzard Gum
+	[47410] = { track = "buff", maxDuration = 3600 }, -- Concoction of the Emerald Mongoose
+	[47412] = { track = "buff", maxDuration = 3600 }, -- Concoction of the Arcane Giant
+	[47414] = { track = "buff", maxDuration = 1200 }, -- Concoction of the Dreamwater
+	[13928] = { track = "food", maxDuration = 900 },  -- Grilled Squid
+	[15723] = { track = "cd" },   -- Tea with Sugar
+	[11951] = { track = "cd" },   -- Whipper Root Tuber
+	[11952] = { track = "cd" },   -- Night Dragon's Breath
+	[18253] = { track = "cd" },   -- Major Rejuvenation Potion
+	[16023] = { track = "cd" },   -- Masterwork Target Dummy
 }
 
 -- Food grants the generic "Well Fed" buff whose icon differs from the item icon, so the

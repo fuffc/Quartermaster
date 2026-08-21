@@ -1610,12 +1610,57 @@ QM.registerConfigTab({
 				if title then pHdr:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
 				else pHdr:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -6) end
 
+				-- One drop answers both "switch to my list" and "give me a list to start from":
+				-- this character's profiles, then the role presets (Presets.lua) under a
+				-- divider. A preset entry builds a NEW profile and switches to it. Entries are
+				-- tagged with a control character rather than a readable prefix so a profile
+				-- can never be confused for one; an existing profile also wins the lookup in
+				-- onSelect regardless, so even a profile named like a preset just switches.
+				local PRESET_TAG = "\1p\1"
+				local PRESET_SEP = "\1s\1"
+				local TAG_LEN = string.len(PRESET_TAG)
+				local presetLabels = { [PRESET_SEP] = "--- start a new profile from ---" }
+				local presetTips   = {}
+				local function presetValues()
+					local v = QM.profileNames()
+					if not QM.presetNames then return v end
+					local pn = QM.presetNames()
+					if table.getn(pn) > 0 then table.insert(v, PRESET_SEP) end
+					for i = 1, table.getn(pn) do
+						local tagged = PRESET_TAG .. pn[i]
+						presetLabels[tagged] = "+ " .. pn[i]
+						presetTips[tagged]   = "Create a new profile from the '" .. pn[i] .. "' preset"
+						table.insert(v, tagged)
+					end
+					return v
+				end
+
 				local profDrop = QM.Config.dropButton(page, {
-					width = 150, height = 22, menuWidth = 170,
-					values   = function() return QM.profileNames() end,
-					onSelect = function(v) QM.setActiveProfile(v) end,
+					width = 150, height = 22, menuWidth = 264,
+					labels = presetLabels, tips = presetTips,
+					values = presetValues,
+					onSelect = function(v)
+						if v == PRESET_SEP then return end   -- the divider row: not selectable
+						local profiles = QM.me and QM.me.profiles
+						if profiles and profiles[v] then QM.setActiveProfile(v); return end
+						if string.sub(v, 1, TAG_LEN) == PRESET_TAG then
+							local preset = string.sub(v, TAG_LEN + 1)
+							QM.Config.confirm("Create a new profile from the '" .. preset .. "' preset?", function()
+								QM.applyPreset(preset)
+							end)
+						end
+					end,
 					get      = function() return QM.activeProfile() end,
 				})
+				-- The menu's click handler pushes whatever was picked onto the face, which for a
+				-- preset entry is the tag, not a profile. Resolve anything that isn't a real
+				-- profile back to the active one so the face can never read as a preset.
+				local rawSetValue = profDrop.setValue
+				profDrop.setValue = function(v)
+					local profiles = QM.me and QM.me.profiles
+					if not (profiles and profiles[v]) then v = QM.activeProfile() end
+					rawSetValue(v)
+				end
 				profDrop:SetPoint("TOPLEFT", pHdr, "BOTTOMLEFT", 0, -4)
 				-- every profile op ends in a DESIRED_CHANGED, so this one hook keeps the
 				-- face current through switch/create/rename/delete/import
