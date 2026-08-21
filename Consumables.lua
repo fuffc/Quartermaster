@@ -1620,9 +1620,14 @@ QM.registerConfigTab({
 				local PRESET_SEP = "\1s\1"
 				local TAG_LEN = string.len(PRESET_TAG)
 				local presetLabels = { [PRESET_SEP] = "--- start a new profile from ---" }
-				local presetTips   = {}
+				local presetTips   = { [PRESET_SEP] = "Pick one below to start a new profile from it" }
 				local function presetValues()
 					local v = QM.profileNames()
+					-- Profiles get a tip too: `tips` is all-or-nothing, so without one every
+					-- profile entry (and the button face) would draw an empty tooltip line.
+					for i = 1, table.getn(v) do
+						presetTips[v[i]] = "Switch to the '" .. v[i] .. "' profile"
+					end
 					if not QM.presetNames then return v end
 					local pn = QM.presetNames()
 					if table.getn(pn) > 0 then table.insert(v, PRESET_SEP) end
@@ -1659,6 +1664,7 @@ QM.registerConfigTab({
 				profDrop.setValue = function(v)
 					local profiles = QM.me and QM.me.profiles
 					if not (profiles and profiles[v]) then v = QM.activeProfile() end
+					presetTips[v] = "Switch to the '" .. v .. "' profile"   -- face paints before any menu open
 					rawSetValue(v)
 				end
 				profDrop:SetPoint("TOPLEFT", pHdr, "BOTTOMLEFT", 0, -4)
