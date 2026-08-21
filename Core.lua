@@ -83,6 +83,8 @@ local defaults = {
 		},
 		-- In-raid tracker HUD (Quartermaster_Main) display options (General tab).
 		hudHidden       = false, -- master hide of the tracker HUD
+		hudBgAlpha      = 0.6,   -- tracker HUD backdrop opacity (0 = fully transparent)
+		hudBorder       = true,  -- draw the tracker HUD's border
 		hudShowIn       = "always", -- when the HUD is allowed on screen: "always" | "group"
 		                            -- (party or raid) | "raid" | "instance" | "raidInstance"
 		showTargetCount = true,  -- HUD count column shows "have/target" vs just "have"

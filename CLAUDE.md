@@ -284,6 +284,9 @@ QuartermasterDB = {
                            -- "instance" | "raidInstance". Soft gate, overridden while
                            -- placing frames; hudHidden stays the hard master switch.
               hudHidden, hudHeader, showTargetCount, showItemName, abbreviateNames, hudOutline,
+              hudBgAlpha, hudBorder,   -- HUD backdrop opacity + border toggle; both are
+                                       -- forced visible while placing frames, so a 0%/
+                                       -- borderless HUD can't become unfindable.
               barTexture,                          -- index into Consumables' BAR_TEXTURES
               buffLowDuration, showBuffIds, guardReuse,
               transfer = { dumpTrackedOverage,      -- /qm restock also banks tracked overage

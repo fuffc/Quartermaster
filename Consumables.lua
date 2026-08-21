@@ -1463,6 +1463,24 @@ function QM.clearHudDrag(f)
 	renderHUD()
 end
 
+-- Paint the HUD's backdrop + border from options.hudBgAlpha / options.hudBorder. While
+-- PLACING frames both are forced visible whatever the settings say -- an invisible,
+-- borderless HUD is otherwise impossible to find and grab. Called on the lock/panel edges
+-- and whenever either option changes.
+local PLACING_MIN_BG = 0.5
+function QM.applyHudChrome()
+	local f = QM.mainFrame
+	if not (f and QM.db) then return end
+	local o = QM.db.options
+	local bg, border = o.hudBgAlpha or 0.6, (o.hudBorder ~= false) and 0.5 or 0
+	if QM.placingFrames() then
+		if bg < PLACING_MIN_BG then bg = PLACING_MIN_BG end
+		border = 0.6
+	end
+	f:SetBackdropColor(0, 0, 0, bg)
+	f:SetBackdropBorderColor(1, 1, 1, border)
+end
+
 -- Toggle the tracker HUD (slash /qm show|hide, and the General-tab check). One place so
 -- both paths print + repaint identically.
 function QM.setHudHidden(hidden)
@@ -1518,7 +1536,8 @@ QM.subscribe("DESIRED_CHANGED",   function() renderHUD() end)
 QM.subscribe("INVENTORY_UPDATED", function() renderHUD() end)
 QM.subscribe("ITEM_META_CHANGED", function() renderHUD() end)
 QM.subscribe("LOCK_CHANGED",      function() renderHUD() end)
-QM.subscribe("CONFIG_TOGGLED",    function() renderHUD() end)   -- placement mode gates the Show HUD rule
+-- Placement mode gates both the Show HUD rule and the forced-visible chrome.
+QM.subscribe("CONFIG_TOGGLED",    function() QM.applyHudChrome(); renderHUD() end)
 
 -- Give the main HUD its backdrop + a lock cue (faint border while unlocked, so it can be
 -- found and dragged; subtle once locked). The frame exists by DB_READY (XML OnLoad ran);
@@ -1555,10 +1574,13 @@ QM.subscribe("DB_READY", function()
 	f:SetScript("OnMouseUp", function() QM.clearHudDrag(this) end)
 
 	f.qmOnLock = function(fr, locked)
-		fr:SetBackdropColor(0, 0, 0, locked and 0.6 or 0.8)
-		fr:SetBackdropBorderColor(1, 1, 1, locked and 0.25 or 0.6)
+		QM.applyHudChrome()
 		if fr.qmGrip then if locked then fr.qmGrip:Hide() else fr.qmGrip:Show() end end
 	end
+	-- Core's DB_READY handler runs before this one (it subscribes at load, and Core loads
+	-- first), so its applyFrameLayout found qmOnLock still nil -- nothing has painted the
+	-- backdrop colour yet. Do it here, now that the hook exists.
+	QM.applyHudChrome()
 
 	-- Fast repaint for short cooldowns: the 0.5s TICK is too coarse to animate a 3s bar, so
 	-- while one is live (hudCdActive) or just after a use/buff-gain kick (hudFastUntil) we
@@ -1959,7 +1981,18 @@ QM.registerConfigTab({
 			end,
 			function() return QM.db.frames.main.scale end,
 			function(v) return string.format("%.2f", v) end)
+		-- Background + border both force back to visible while placing frames, so 0% / no
+		-- border can't strand the HUD unfindable (see QM.applyHudChrome). Placed beside the
+		-- scale slider rather than at L.col2: a slider is 170 wide, so col2 (300) would run
+		-- past the 456-wide page; 16 + 170 + a 24 gap clears it.
+		QM.Config.slider(page, "QuartermasterHudBgAlpha", "Background", 0, 1, 0.05, 210, L.y - 14,
+			function(v) QM.db.options.hudBgAlpha = v; QM.applyHudChrome() end,
+			function() return QM.db.options.hudBgAlpha end,
+			function(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end)
 		L.advance(46)
+		L.checks({ "Show HUD border",
+			function(on) QM.db.options.hudBorder = on; QM.applyHudChrome() end,
+			function() return QM.db.options.hudBorder end })
 
 		-- Bar texture (its face is a live preview bar labelled "Progress bar texture"; the name
 		-- shows only in the open menu) alongside the HUD anchor corner.
