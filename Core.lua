@@ -723,6 +723,15 @@ end
 -- qmMoving flag lets a frame's own painter skip re-layout while a native move is in
 -- progress: resizing/SetHeight'ing a frame mid-StartMoving corrupts the move and hard-
 -- crashes the 1.12 client on mouse-up (the tracker HUD re-sizes every tick).
+-- Is a mouse button held? true / false, or nil when the client cannot say -- this 1.12
+-- client has no IsMouseButtonDown, and calling it outright is a nil-global error. Callers
+-- use it for "did we miss a mouse-up" safety nets, so they must treat nil as "don't know"
+-- and fall back on another release path rather than assuming the button is up.
+function QM.mouseDown(button)
+	if not IsMouseButtonDown then return nil end
+	return IsMouseButtonDown(button) and true or false
+end
+
 function Quartermaster_FrameDragStart()
 	if QM.db and QM.db.options.locked then return end
 	this.qmMoving = true

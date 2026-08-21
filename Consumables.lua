@@ -1354,6 +1354,23 @@ local function renderHUD(data)
 	f:Show()
 end
 
+-- End any move/resize the HUD thinks is in progress, and repaint. Idempotent, so every
+-- release path (the grip, the frame's own OnMouseUp, the TICK net) can call it blind.
+-- A stuck qmMoving freezes renderHUD for the rest of the session, so the release paths
+-- are deliberately redundant.
+function QM.clearHudDrag(f)
+	f = f or QM.mainFrame
+	if not (f and f.qmMoving) then return end
+	f:StopMovingOrSizing()
+	f:SetResizable(false)
+	f.qmMoving, f.qmResizing = false, false
+	if QM.db then
+		QM.db.frames.main.width = f:GetWidth()   -- explicitly SetWidth'd, so GetWidth is honest here
+		QM.storeFramePos(f)
+	end
+	renderHUD()
+end
+
 -- Toggle the tracker HUD (slash /qm show|hide, and the General-tab check). One place so
 -- both paths print + repaint identically.
 function QM.setHudHidden(hidden)
@@ -1368,10 +1385,11 @@ QM.subscribe("TICK", function()
 	if not QM.db or not QM.me then return end
 	-- Safety net: clear a stuck move/resize flag if a mouse-up was missed off-frame, so a
 	-- frozen renderHUD can't strand the HUD (qmMoving is the mid-move CTD guard, see Core).
+	-- Only fires on a client that can actually report the button; QM.mouseDown returns nil
+	-- when it can't (this one has no IsMouseButtonDown), and there the frame's own OnMouseUp
+	-- is what clears the flag instead.
 	local f = QM.mainFrame
-	if f and f.qmMoving and not IsMouseButtonDown("LeftButton") then
-		f:StopMovingOrSizing(); f:SetResizable(false); f.qmMoving = false; f.qmResizing = false
-	end
+	if f and f.qmMoving and QM.mouseDown("LeftButton") == false then QM.clearHudDrag(f) end
 	updateEatSession()
 	local data = C.activeBuffs()
 	runNotifications(data)
@@ -1422,15 +1440,13 @@ QM.subscribe("DB_READY", function()
 	grip:SetNormalTexture("Interface\\AddOns\\Quartermaster\\textures\\ResizeGrip")
 	grip:SetHighlightTexture("Interface\\AddOns\\Quartermaster\\textures\\ResizeGrip", "ADD")
 	grip:SetScript("OnMouseDown", function() f.qmMoving = true; f.qmResizing = true; f:SetResizable(true); f:StartSizing("RIGHT") end)
-	grip:SetScript("OnMouseUp", function()
-		f:StopMovingOrSizing()
-		f:SetResizable(false)
-		f.qmMoving = false; f.qmResizing = false
-		QM.db.frames.main.width = f:GetWidth()
-		QM.storeFramePos(f)
-		renderHUD()
-	end)
+	grip:SetScript("OnMouseUp", function() QM.clearHudDrag(f) end)
 	f.qmGrip = grip
+
+	-- The net that actually catches an off-frame release: a frame receives OnMouseUp for any
+	-- press that BEGAN on it no matter where the button comes up, so this covers the drag that
+	-- ends over another frame -- which is what the (unavailable) button poll was meant to.
+	f:SetScript("OnMouseUp", function() QM.clearHudDrag(this) end)
 
 	f.qmOnLock = function(fr, locked)
 		fr:SetBackdropColor(0, 0, 0, locked and 0.6 or 0.8)

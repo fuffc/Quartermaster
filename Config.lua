@@ -1193,8 +1193,10 @@ function QM.Config.listEditor(parent, spec)
 			trackDrag(arg1)   -- arg1 = elapsed, drives auto-scroll
 			-- Safety net: OnDragStop doesn't fire when the release lands on a divider's label
 			-- editbox (its mouse handling swallows the drag-stop), stranding the drag until a
-			-- reload. Poll the button and finish the drop ourselves.
-			if not IsMouseButtonDown("LeftButton") then endDrag() end
+			-- reload. Poll the button and finish the drop ourselves -- only where the client
+			-- can report it (QM.mouseDown is nil-safe; this one can't, so the net is inert
+			-- here and the drag ends on OnDragStop as usual).
+			if QM.mouseDown("LeftButton") == false then endDrag() end
 		end
 	end)
 
