@@ -616,38 +616,95 @@ function QM.learnWeaponEnchantNow(id, apply)
 	return nil
 end
 
--- Live status of the matching self-buff: present, time left (s), stacks. Walks the
--- player's HELPFUL buffs for one satisfying the rule, then reads its remaining time
+-- An empty HELPFUL slot inside 0..MAX_BUFF_SLOT is a GAP, not the end of the list: breaking at
+-- the first -1 hides every buff past the first hole, which is why some tracked rows lit up and
+-- others never did. Every scan below therefore sweeps the whole range and SKIPS empties
+-- (AuraCore's BuffTracker reads them the same way). GetPlayerBuff maps a filtered slot to the
+-- raw buff index the GetPlayerBuff* readers take; < 0 means "nothing in this slot".
+local MAX_BUFF_SLOT = 31
+
+local function helpfulBuffAt(i)
+	if not GetPlayerBuff then return nil end
+	local bi = GetPlayerBuff(i, "HELPFUL")
+	if not bi or bi < 0 then return nil end
+	return bi
+end
+
+-- Live status of the matching self-buff: present, time left (s), stacks. Reads remaining time
 -- (GetPlayerBuffTimeLeft) and stack count (GetPlayerBuffApplications) -- both native 1.12.
 function QM.selfBuffPresent(m)
 	if not m then return false end
-	if not GetPlayerBuff then return false end
-	local i = 0
-	while true do
-		local bi = GetPlayerBuff(i, "HELPFUL")
-		if bi == -1 or bi == nil then break end
-		local hit
-		if m.by == "icon" then
-			-- Compare case-INsensitively: the buff aura's icon path and the item's icon
-			-- path point at the same file but differ in case on 1.12 (GetPlayerBuffTexture
-			-- vs GetItemInfo) -- an exact == never matches (cf. FearWardHelper's lower()).
-			local tex = GetPlayerBuffTexture(bi)
-			hit = tex and m.value and string.lower(tex) == string.lower(m.value)
-		elseif m.by == "name" then
-			local nm = buffName(bi)
-			hit = nm and m.value and string.lower(nm) == string.lower(m.value)
-		elseif m.by == "id" then
-			hit = QM.playerBuffSpellId(bi) == m.value
+	for i = 0, MAX_BUFF_SLOT do
+		local bi = helpfulBuffAt(i)
+		if bi then
+			local hit
+			if m.by == "icon" then
+				-- Compare case-INsensitively: the buff aura's icon path and the item's icon
+				-- path point at the same file but differ in case on 1.12 (GetPlayerBuffTexture
+				-- vs GetItemInfo) -- an exact == never matches (cf. FearWardHelper's lower()).
+				local tex = GetPlayerBuffTexture(bi)
+				hit = tex and m.value and string.lower(tex) == string.lower(m.value)
+			elseif m.by == "name" then
+				local nm = buffName(bi)
+				hit = nm and m.value and string.lower(nm) == string.lower(m.value)
+			elseif m.by == "id" then
+				hit = QM.playerBuffSpellId(bi) == m.value
+			end
+			if hit then
+				local tl = GetPlayerBuffTimeLeft and GetPlayerBuffTimeLeft(bi, "HELPFUL") or nil
+				local st = GetPlayerBuffApplications and GetPlayerBuffApplications(bi) or nil
+				if st and st < 2 then st = nil end   -- a single application is not a "stack"
+				return true, tl, st
+			end
 		end
-		if hit then
-			local tl = GetPlayerBuffTimeLeft and GetPlayerBuffTimeLeft(bi, "HELPFUL") or nil
-			local st = GetPlayerBuffApplications and GetPlayerBuffApplications(bi) or nil
-			if st and st < 2 then st = nil end   -- a single application is not a "stack"
-			return true, tl, st
-		end
-		i = i + 1
 	end
 	return false
+end
+
+-- Lowercased icon paths of every HELPFUL buff up right now, as a set. The cheap before/after
+-- signature the capture-on-use below compares (no tooltip scans).
+function QM.playerBuffIconSet()
+	local set = {}
+	for i = 0, MAX_BUFF_SLOT do
+		local bi = helpfulBuffAt(i)
+		local tex = bi and GetPlayerBuffTexture and GetPlayerBuffTexture(bi)
+		if tex then set[string.lower(tex)] = true end
+	end
+	return set
+end
+
+-- Capture-on-use for a self/target consumable: the ONE buff icon that appeared since `before`
+-- is this item's effect, so adopt it as an explicit icon rule. Only adopts when exactly one is
+-- new -- a second buff landing in the same window (a raid buff alongside the elixir) is
+-- ambiguous, and a wrong rule is worse than no rule. Returns the learned icon, or nil.
+-- The self-buff counterpart of learnWeaponEnchant's capture-on-apply.
+function QM.learnSelfBuff(id, before)
+	if not (id and before and GetPlayerBuffTexture) then return nil end
+	local found
+	for i = 0, MAX_BUFF_SLOT do
+		local bi = helpfulBuffAt(i)
+		local tex = bi and GetPlayerBuffTexture(bi)
+		if tex and not before[string.lower(tex)] then
+			if found then return nil end   -- two new buffs: can't tell which is ours
+			found = tex
+		end
+	end
+	if not found then return nil end
+	QM.setItemMatch(id, "icon", found)
+	return found
+end
+
+-- Every HELPFUL buff on the player: { { index, icon, name, id }, ... }. Backs /qm buffs.
+function QM.playerBuffList()
+	local out = {}
+	for i = 0, MAX_BUFF_SLOT do
+		local bi = helpfulBuffAt(i)
+		local tex = bi and GetPlayerBuffTexture and GetPlayerBuffTexture(bi)
+		if tex then
+			table.insert(out, { index = bi, icon = tex, name = buffName(bi), id = QM.playerBuffSpellId(bi) })
+		end
+	end
+	return out
 end
 
 -- Live status of the matching weapon temp-enchant: present, time left (s), charges.

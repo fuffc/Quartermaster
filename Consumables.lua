@@ -116,20 +116,9 @@ local EAT_FLASH        = 0.9   -- with no learned eat aura, how long the click-f
 
 local eatSession   -- { id, start, pre = {iconSet}, candidate = icon } or nil
 
--- Lowercased icon paths of the player's current HELPFUL buffs, as a set.
-local function helpfulBuffIcons()
-	local set = {}
-	if not GetPlayerBuff then return set end
-	local i = 0
-	while true do
-		local bi = GetPlayerBuff(i, "HELPFUL")
-		if bi == -1 or bi == nil then break end
-		local tex = GetPlayerBuffTexture and GetPlayerBuffTexture(bi)
-		if tex then set[string.lower(tex)] = true end
-		i = i + 1
-	end
-	return set
-end
+-- Lowercased icon paths of the player's current HELPFUL buffs, as a set. One implementation
+-- in ItemMeta -- the gap-skipping sweep there is the only correct way to read the buff slots.
+local helpfulBuffIcons = QM.playerBuffIconSet
 
 -- Is this food's learned eating aura (items[id].eatMatch) currently on the player? The
 -- per-item "still eating" signal; false when nothing learned yet (then we lean on the backstops).
