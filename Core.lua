@@ -77,6 +77,11 @@ local defaults = {
 		rowOrder        = "config", -- tracker row order: "config" | "active" | "duration"
 		guardReuse      = true, -- block a HUD consume while the buff is up above the low threshold (shift forces)
 		transfer = {
+			-- Mail is OPT-IN and off by default: it moves items off the character to somewhere
+			-- only a mailbox can get them back from, so it stays inert until asked for. Gates
+			-- the mail panel, the mailsync/mailtest commands and every send (QM.mailEnabled).
+			-- Recipients can still be configured while it is off, ready for turning on.
+			mailEnabled        = false,
 			dumpTrackedOverage = true, -- /qm restock also banks tracked-list qty above target
 			mailTrackedOverage = true, -- Dump Excess also mails tracked-list qty above target
 			                           -- to the default mail recipient, when one is set
@@ -893,6 +898,10 @@ SlashCmdList["QUARTERMASTER"] = function(rawmsg)
 			if charArg and QM.Transfer and QM.Transfer.mailSyncTo then
 				QM.Transfer.mailSyncTo(charArg, listArg ~= "" and listArg or nil)
 			end
+		elseif QM.mailEnabled and not QM.mailEnabled() then
+			-- Don't advertise the syntax of a feature that's switched off; the gated calls
+			-- above say the same thing when they're actually reached.
+			QM.print("mail features are off -- turn them on with 'Enable mail features' on the Transfer tab")
 		else
 			QM.print("usage: /qm mailsync dump  |  /qm mailsync <character> [list]")
 		end

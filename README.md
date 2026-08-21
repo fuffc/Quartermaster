@@ -112,8 +112,8 @@ config panel.
 | `/qm buffs` | Print every buff currently on you (name, icon, spell id) beside each tracked row's match rule and whether it resolves right now. The diagnostic for "the buff is up, so why is that row grey?". |
 | `/qm presets` | List the built-in role presets. |
 | `/qm prep` | Print the active list's shortfall to chat — what's short vs. Target, and how much of that is sitting in your bank or on other characters. Same report as the Tracker tab's **Prep** button. |
-| `/qm mailsync dump` | Mail every Transfer-list item's excess above its Keep floor to its recipient (plus tracked-list overage to your default recipient, if set). Requires the mailbox open. |
-| `/qm mailsync <character> [list]` | Mail *this* character's covering stock to help another character's shortfall on the given list (defaults to that character's active profile). Requires the mailbox open. |
+| `/qm mailsync dump` | Mail every Transfer-list item's excess above its Keep floor to its recipient (plus tracked-list overage to your default recipient, if set). Requires the mailbox open and **Enable mail features** ticked (off by default). |
+| `/qm mailsync <character> [list]` | Mail *this* character's covering stock to help another character's shortfall on the given list (defaults to that character's active profile). Requires the mailbox open and **Enable mail features** ticked. |
 
 ## The config panel
 
@@ -198,6 +198,12 @@ The proactive-shed list — items you want to move *off* this character rather t
 stock up on — plus recipient management. The live mail-sending controls themselves are
 **not** here; they're on the [mailbox panel](#the-mailbox-panel), shown only while your
 mailbox is actually open.
+
+- **Enable mail features** — **off by default.** Mail sends items somewhere only a mailbox
+  can get them back from, so nothing mails until you tick this: it gates the mailbox panel,
+  `/qm mailsync`, `/qm mailtest` and every send. Recipients below stay editable while it's
+  off, so you can set everything up first and then switch it on. Bank transfers
+  (`/qm restock`) are unaffected — they're not mail.
 
 ![The Transfer tab, with the recipient list and a couple of shed-list rows](docs/transfer-tab.png)
 
@@ -310,9 +316,10 @@ any category dividers you've set up.
 
 ## The mailbox panel
 
-While your mailbox is open, a small **Quartermaster_Mail** panel appears anchored above
-it (draggable, but it re-anchors on every mailbox open rather than remembering a
-position):
+Requires **Enable mail features** on the [Transfer tab](#transfer-tab), which is off by
+default. With it on, opening your mailbox shows a small **Quartermaster_Mail** panel
+anchored above it (draggable, but it re-anchors on every mailbox open rather than
+remembering a position):
 
 - **Dump Excess** — sends everything on your Transfer list above its Keep floor to its
   resolved recipient (same as `/qm mailsync dump`).

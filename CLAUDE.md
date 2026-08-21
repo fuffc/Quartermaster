@@ -200,7 +200,13 @@ Quartermaster` at the top of each file.
   *receiving* character's own `TakeInboxItem` hook — with a `MAIL_SHOW` wipe as a backstop
   (a redundant resend is cheaper than a shortfall silently never covered). Both live mail
   controls sit on the **`Quartermaster_Mail`** panel (not a config tab), shown only while
-  the mailbox is open. The sequencer runs **with or without TurtleMail**: TurtleMail
+  the mailbox is open **and mail is enabled**. Mail is **opt-in, off by default**
+  (`options.transfer.mailEnabled`, ticked on the Transfer tab): it ships items somewhere
+  only a mailbox gets them back from, so it stays inert until asked for. `QM.mailEnabled()`
+  gates the panel, the `mailsync`/`mailtest` commands, and each of `T.mailDumpExcess`/
+  `T.supplySend`/`T.mailSyncTo`/`T.mailTest` -- plus `T.mailItems`, the chokepoint every
+  send funnels through, so a caller that forgets the check still can't mail. Recipient
+  management stays usable while it's off, so a setup can be prepared before switching on. The sequencer runs **with or without TurtleMail**: TurtleMail
   globally replaces `ClickSendMailItemButton` at `PLAYER_LOGIN` with an async version that
   never attaches anything inside one synchronous call, so `T.mailItems` attaches via the
   surviving `TurtleMail.orig` when `QM.caps.turtleMail`, and neutralizes its
@@ -291,7 +297,11 @@ QuartermasterDB = {
                                        -- backdrop (it picks the bordered/borderless variant).
               barTexture,                          -- index into Consumables' BAR_TEXTURES
               buffLowDuration, showBuffIds, guardReuse,
-              transfer = { dumpTrackedOverage,      -- /qm restock also banks tracked overage
+              transfer = { mailEnabled,             -- OPT-IN, default FALSE: gates the mail
+                                                    -- panel, /qm mailsync|mailtest and every
+                                                    -- send (QM.mailEnabled). Recipients stay
+                                                    -- configurable while it's off.
+                           dumpTrackedOverage,      -- /qm restock also banks tracked overage
                            mailTrackedOverage },     -- Dump Excess also mails tracked overage
               notify = { enabled, duration, fontSize,
                          lowRepair, lowConsumable,   -- per-category gates
@@ -362,7 +372,7 @@ match rule and a live verdict (the diagnostic for "the buff is up, why is the ro
 `/qm presets` lists the role presets;
 `/qm mailsync dump` / `/qm mailsync
 <character> [list]` run the Transfer mail sync (list defaults to that character's
-`activeProfile`; both need the mail window open); `/qm mailtest <recipient>
+`activeProfile`; both need the mail window open, and mail enabled); `/qm mailtest <recipient>
 [delaySeconds]` is a debug probe for the SendMail-no-reply failure. Character/profile
 names are case-sensitive, so the handler preserves the slash text's original case for
 `mailsync`'s arguments. Everything else lives in the panel/mail panel — no full slash
@@ -383,9 +393,10 @@ tooltips, as a discovery aid for typing Track match ids. **Tracker** (the unifie
 list, profile switcher — whose drop also carries the **role presets** below a divider,
 see [Presets.lua](Presets.lua) — row order, low-duration, don't-reuse, and the consumable
 notification triggers). **Repair** (auto-repair, durability threshold, low-repair
-trigger). **Transfer** (registered in [Transfer.lua](Transfer.lua) — the transferable
-list plus recipient management and the tracked/transferable-overage sync options; the
-live mail-action controls sit on the `Quartermaster_Mail` panel instead, not this tab).
+trigger). **Transfer** (registered in [Transfer.lua](Transfer.lua) — the **Enable mail
+features** opt-in, the transferable list plus recipient management and the
+tracked/transferable-overage sync options; the live mail-action controls sit on the
+`Quartermaster_Mail` panel instead, not this tab).
 There is no separate Notifications tab — the strip's presentation is on Display and its
 per-category triggers sit on whichever feature tab raises them.
 

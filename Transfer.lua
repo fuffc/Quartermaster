@@ -13,6 +13,21 @@ local QM = Quartermaster
 QM.Transfer = {}
 local T = QM.Transfer
 
+-- Are the mail features turned on? Opt-in, off until enabled on the Transfer tab (mail
+-- ships items somewhere only a mailbox gets them back from, so it stays inert until asked
+-- for). Every send funnels through T.mailItems, which checks this, so a caller that forgets
+-- still can't mail; the higher-level entry points check it too, only to say so clearly.
+function QM.mailEnabled()
+	local o = QM.db and QM.db.options.transfer
+	return (o and o.mailEnabled) and true or false
+end
+
+-- One message, so every refusal reads the same wherever it is raised.
+local function mailDisabled()
+	QM.print("mail features are off -- turn them on with 'Enable mail features' on the Transfer tab")
+	return false
+end
+
 -- The transferable list never rejects an add (like consumables' classifier), and
 -- defaults new rows to Keep=0 (ship everything) with bankable on. It has no `low`
 -- (no warn-threshold concept for this list).
@@ -699,6 +714,13 @@ end
 -- without TurtleMail: the attach goes through clickSendSlot (see its comment), and any
 -- TurtleMail state that would make its bag hooks interfere is dropped up front.
 function T.mailItems(recipient, queue, onDone)
+	-- The one gate every send passes through, so nothing can mail while the feature is off
+	-- however it was reached.
+	if not QM.mailEnabled() then
+		mailDisabled()
+		if onDone then onDone() end
+		return
+	end
 	if Mailer.sending then
 		QM.print("already mailing -- wait for the current batch to finish")
 		return
@@ -822,6 +844,7 @@ MailTest:SetScript("OnEvent", function()
 end)
 
 function T.mailTest(recipient, delay)
+	if not QM.mailEnabled() then return mailDisabled() end
 	if not recipient or recipient == "" then
 		QM.print("usage: /qm mailtest <recipient> [delaySeconds] (mailbox must be open)")
 		return
@@ -1341,6 +1364,7 @@ local function prepItemsBatch(items, callback)
 end
 
 function T.mailDumpExcess()
+	if not QM.mailEnabled() then return mailDisabled() end
 	local c = QM.me
 	if not c then return end
 	local groups, order = {}, {}
@@ -1467,6 +1491,7 @@ end
 -- (Transfer.lua's TakeInboxItem hook, QM.clearInFlight) -- or, failing that, once
 -- targetCharKey's own MAIL_SHOW resets the cache outright (see above).
 function T.supplySend(targetCharKey, profileName)
+	if not QM.mailEnabled() then return mailDisabled() end
 	local rows = T.supplyPlan(targetCharKey, profileName)
 	if table.getn(rows) == 0 then
 		QM.print(targetCharKey .. " isn't short on anything you're carrying")
@@ -1490,6 +1515,7 @@ end
 -- /qm mailsync <character> [list] -- list defaults to that character's active profile.
 -- Updates the stored mail target the same as picking it from the Transfer tab.
 function T.mailSyncTo(charKey, profileName)
+	if not QM.mailEnabled() then return mailDisabled() end
 	local rec = QM.db and QM.db.chars[charKey]
 	if not rec and QM.db then
 		-- slash input is easy to mis-case; fall back to a case-insensitive key match.
@@ -1530,6 +1556,7 @@ end
 
 QM.on("MAIL_SHOW", function()
 	if not QM.mailFrame then return end
+	if not QM.mailEnabled() then QM.mailFrame:Hide(); return end
 	anchorMailFrame()
 	QM.mailFrame:Show()
 end)
@@ -1654,8 +1681,26 @@ QM.registerConfigTab({
 					recipientList:SetHeight(((n > 0) and n or 1) * RECIPIENT_ROW_H)
 				end
 
+				-- Mail is opt-in (see options.transfer.mailEnabled). The recipient controls
+				-- below stay usable while it's off, so a setup can be prepared before
+				-- switching it on; nothing sends until this is ticked.
+				local mailEnableCheck = QM.Config.check(page,
+					"Enable mail features (mail panel, /qm mailsync)", 8, -6,
+					function(v)
+						QM.db.options.transfer.mailEnabled = v
+						-- Switched off with the mailbox already open: drop the panel now
+						-- rather than leaving it live until MAIL_CLOSED.
+						if not v and QM.mailFrame then QM.mailFrame:Hide() end
+					end,
+					function() return QM.mailEnabled() end)
+				if title then
+					mailEnableCheck:ClearAllPoints()
+					mailEnableCheck:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+				end
+
 				local recipHdr = QM.Config.sectionHeader(page, "Mail recipients", 8, -6)
-				if title then recipHdr:ClearAllPoints(); recipHdr:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8) end
+				recipHdr:ClearAllPoints()
+				recipHdr:SetPoint("TOPLEFT", mailEnableCheck, "BOTTOMLEFT", 0, -8)
 
 				-- One row, left-aligned under the section header: the add box + Add button
 				-- first, then the custom-recipient listbox, then the default-recipient drop.
