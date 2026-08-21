@@ -107,7 +107,9 @@ config panel.
 | `/qm` or `/qm config` | Toggle the config panel. |
 | `/qm lock` / `/qm unlock` | Lock or unlock all moveable frames (HUD, notification strip) against dragging. |
 | `/qm show` / `/qm hide` | Show or hide the tracker HUD. |
-| `/qm banksync` | Top up this character's tracked-list shortfall from an **open bank**, then (by default) bank any tracked-list overage and any bankable item on the Transfer list. Requires the bank window open. |
+| `/qm banksync` | Top up this character's tracked-list shortfall from an **open bank**, then (by default) bank any tracked-list overage and any bankable item on the Transfer list. Requires the bank window open. Also reachable without typing: the **Restock** button above the bank frame, or a key binding (*Key Bindings → Quartermaster → Restock tracked consumables from bank*). |
+| `/qm buffs` | Print every buff currently on you (name, icon, spell id) beside each tracked row's match rule and whether it resolves right now. The diagnostic for "the buff is up, so why is that row grey?". |
+| `/qm presets` | List the built-in role presets. |
 | `/qm prep` | Print the active list's shortfall to chat — what's short vs. Target, and how much of that is sitting in your bank or on other characters. Same report as the Tracker tab's **Prep** button. |
 | `/qm mailsync dump` | Mail every Transfer-list item's excess above its Keep floor to its recipient (plus tracked-list overage to your default recipient, if set). Requires the mailbox open. |
 | `/qm mailsync <character> [list]` | Mail *this* character's covering stock to help another character's shortfall on the given list (defaults to that character's active profile). Requires the mailbox open. |
@@ -127,7 +129,13 @@ notification strip.
 
 ![The Display tab](docs/display-tab.png)
 
-- **Frames:** *Lock frames*, *Hide the tracker HUD*.
+- **Frames:** *Lock frames*, *Hide the tracker HUD*, and **Show HUD** — when the HUD is
+  allowed on screen at all: *Always*, *In a party or raid*, *In a raid group*, *In any
+  instance*, or *In a raid instance*. The group options ask "who am I with" (true the
+  moment you join a raid, still true in a city); the instance ones ask "am I actually in
+  there". This is a soft gate: while you have this panel open **and** frames unlocked, the
+  HUD shows regardless so you can position it. *Hide the tracker HUD* stays the hard
+  master switch.
 - **HUD content:** *Show HUD header*, *Show item name*, *Abbreviate names to fit*, *Show
   target count (have/target)*, *Outline HUD text*, *Show buff/enchant IDs on tooltips*
   (a discovery aid for typing an exact match ID in the gear popup — see below).
@@ -152,6 +160,13 @@ everything about how the tracker behaves.
   [Profiles](#profiles-export--import) below). **Prep** opens a read-only report of the
   active list's shortfall vs. Target and where the rest of it is (bank / other
   characters) — the same report as `/qm prep`.
+- The **Profile** drop also lists nine ready-made **role presets** below a divider, each
+  marked with a leading `+` (Hunter, Caster DPS, Magic Melee, Physical Melee, Tank,
+  Healer, and so on). Picking one builds a **new** profile from it and switches to
+  it — it never overwrites a list you already have, so it is safe to try. The lists are
+  deliberately generous and include Turtle-only consumables; trim what you don't want with
+  each row's state chip rather than deleting, so it's easy to flip back on. `/qm presets`
+  lists them in chat.
 - **Don't re-use an active buff (shift-click to force)** — when on, clicking an
   already-active buff's HUD row does nothing unless you shift-click; stops an accidental
   double-use.
@@ -281,9 +296,11 @@ any category dividers you've set up.
 - **Left-click a row to consume that item** — no need to open a bag. If "don't re-use an
   active buff" is on and the buff still has plenty of time left, a plain click is a
   no-op (with a chat reminder); shift-click always forces it.
-- The HUD hides itself automatically when empty, and — by default — while you're
-  solo (not grouped); there's currently no config-panel toggle for the solo behavior,
-  only the master `/qm show`/`/qm hide` and the Display tab's *Hide the tracker HUD*.
+- The HUD hides itself automatically when empty, and whenever the Display tab's **Show
+  HUD** setting says you're out of context (see [Display tab](#display-tab)). To position
+  it, open `/qm` and untick *Lock frames* — that combination is what counts as placing
+  frames, and the HUD shows while it holds. `/qm show`/`/qm hide` and *Hide the tracker
+  HUD* remain the hard master switch.
 
 ## The mailbox panel
 

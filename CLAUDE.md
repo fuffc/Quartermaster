@@ -59,6 +59,13 @@ Quartermaster` at the top of each file.
   `profiles[activeProfile]` (the same table) — switching just re-points that alias and
   fires `DESIRED_CHANGED`; `migrateChar` re-links it on every load. Export/import is a
   hand-parsed `"QMP1:" .. base64(payload)` line format, **never `loadstring`**.
+- [Presets.lua](Presets.lua) — nine curated **role presets** (`QM.presets`, each
+  `{ name, items = {{ itemID, target }, ...} }`), offered from the bottom of the Tracker
+  tab's Profile drop under a divider and listed by `/qm presets`. `QM.applyPreset(name)`
+  always builds a **new** profile (name uniquified via `QM.uniqueProfileName`) and
+  switches to it, so it can never overwrite a list already in use. Rows are built through
+  the same `QM.itemValidators["consumables"]` classifier the add box uses, so apply modes
+  come out right without the preset declaring them.
 - [ItemDB.lua](ItemDB.lua) — a **name → itemID index** for the add box's typed-name
   resolution and Tab-complete. **Compat**: if aux is loaded, reads its
   `aux.account.item_ids` directly. **Standalone**: otherwise builds & persists our own
@@ -72,9 +79,18 @@ Quartermaster` at the top of each file.
   field. Owns the **live effect reader** `QM.itemEffect(id, apply)` (self-buff time-left/
   stacks, or weapon temp-enchant via Nampower/`GetWeaponEnchantInfo`) and
   `QM.itemMatchEffective` (the in-force match rule — weapon items need an *explicit*
-  `enchantid`, never a guessed default). A weapon enchant's identity is **learned on
-  apply**: `C.use` snapshots the slot's pre-apply enchant so `QM.learnWeaponEnchant` can
-  commit the new one only once it differs, avoiding a stale-id window right after replace.
+  `enchantid`, never a guessed default; a rule whose capability this client lacks is
+  **skipped** in favour of the icon default rather than honoured, since the `SEED` bypasses
+  `setItemMatch`'s own availability check and an unreadable rule would peg the row at
+  "never up"). An effect's identity is **learned on use** in both directions: `C.use`
+  snapshots the slot's pre-apply enchant so `QM.learnWeaponEnchant` commits the new one only
+  once it differs (avoiding a stale-id window right after replace), and snapshots the buffs
+  already up so `QM.learnSelfBuff` can adopt the one that appears. Both decline to learn
+  when the answer is ambiguous — a wrong rule is worse than none. This matters because
+  almost every `SEED` entry carries no explicit `match` and leans on the derived
+  "buff icon == item icon" default, which is simply false for scrolls, food and jujus.
+  **Every buff scan sweeps slots 0..31 and skips empties** — an empty slot is a gap, not the
+  end of the list, and breaking at the first `-1` hides every buff past the first hole.
   Also owns **`QM.caps`**, the capability/compat table (`superwow`, `nampower`,
   `equippedItem`, `cUnitAuras`, `itemIdCooldown`, `turtleMail`, `aux`) every module
   branches on instead of re-probing.
@@ -201,7 +217,11 @@ Quartermaster` at the top of each file.
 - [Config.lua](Config.lua) — the tabbed panel framework + reusable widgets.
 - [Quartermaster.xml](Quartermaster.xml) — the moveable main HUD + notification frame
   shells (contents built in Lua; events live on Core's Lua engine frame, not these).
-- [pack.ps1](pack.ps1) — builds `Quartermaster.zip`.
+- [Bindings.xml](Bindings.xml) — the Key Bindings entry for the bank Restock action. The
+  client loads this on **filename alone**, so it is deliberately *not* a `.toc` entry —
+  which is why [pack.ps1](pack.ps1) has to name it explicitly (see below).
+- [pack.ps1](pack.ps1) — builds `Quartermaster.zip`. Its file list comes from the `.toc`
+  so it can't drift, plus `Bindings.xml` named outright since that isn't listed there.
 
 **Load order** (`.toc`): Core, Profiles, then feature modules, then Config, then the XML.
 Modules register events/signals/config-tabs at load; Core dispatches.
@@ -213,7 +233,8 @@ and the `OnUpdate`. `QM.on(event, fn)` registers the event on first use and appe
 handler (handlers read the global `event`/`arg1..` as usual on 1.12). `QM.subscribe`/
 `QM.fire` is a second, **internal** pub/sub for module decoupling (signals: `DB_READY`,
 `READY`, `TICK` (~0.5s), `INVENTORY_UPDATED`, `DURABILITY_UPDATED`, `DESIRED_CHANGED`,
-`ITEM_META_CHANGED`, `ITEMDB_READY`, `LOCK_CHANGED`, `FRAME_MOVED`, `CONFIG_SHOWN`).
+`ITEM_META_CHANGED`, `ITEMDB_READY`, `LOCK_CHANGED`, `FRAME_MOVED`, `CONFIG_SHOWN`,
+`CONFIG_TOGGLED` (the panel's own OnShow/OnHide — see placement mode below)).
 `BAG_UPDATE` only sets a dirty flag; the actual rescan is debounced to the next `TICK`.
 
 ### Moveable / anchorable frames
@@ -230,6 +251,18 @@ locks on `LOCK_CHANGED`. The main HUD and notify area both use it. The **mail pa
 mailbox-relative anchor doesn't fit the UIParent-relative assumption the rest of the
 system makes. It's still draggable, just not persisted.
 
+**Placement mode** (`QM.placingFrames()`) is when the frames are being *arranged*: the
+config panel is open **AND** frames are unlocked. Both are required because each alone is
+a state people sit in for hours — unlocked-only parked the HUD on screen outside a raid,
+which is exactly what `hudShowIn` exists to prevent, and panel-open-only did the same
+while configuring anything at all. While placing, a context-suppressed HUD still shows
+(empty, with a placeholder) and the notify dock paints its chrome; outside it both obey
+their own rules. `QM.configOpen` is tracked from the panel's own `OnShow`/`OnHide`, **not**
+`toggleConfig` — the close button and Escape bypass that function entirely — and broadcast
+as `CONFIG_TOGGLED`. The notify dock's `EnableMouse` follows its chrome visibility (it runs
+after `applyFrameLock`'s own call, so it wins): an invisible 240x40 frame must not keep
+eating clicks in that patch of screen.
+
 **1.12 CTD rule: a frame's height (or width) must have exactly ONE owner.** The tracker
 HUD's height is content-driven (`SetHeight` to its row count), so: the resize grip is
 **width-only** (`StartSizing("RIGHT")`, never `"BOTTOMRIGHT"`) since native sizing and our
@@ -245,8 +278,11 @@ Account-wide on purpose — that's what lets a bank alt read the raid char's wan
 
 ```lua
 QuartermasterDB = {
-  options = { locked, showWhenSolo, autoRepair, repairThreshold,
+  options = { locked, autoRepair, repairThreshold,
               reagentRestock, rowOrder,
+              hudShowIn,   -- when the HUD may show: "always" | "group" | "raid" |
+                           -- "instance" | "raidInstance". Soft gate, overridden while
+                           -- placing frames; hudHidden stays the hard master switch.
               hudHidden, hudHeader, showTargetCount, showItemName, abbreviateNames, hudOutline,
               barTexture,                          -- index into Consumables' BAR_TEXTURES
               buffLowDuration, showBuffIds, guardReuse,
@@ -310,9 +346,14 @@ the prep view still shows where stock is. `itemID` comes from parsing the item l
 
 **Slash is intentionally minimal**: `/qm` / `/qm config` toggles the panel; `/qm lock` /
 `/qm unlock`; `/qm show` / `/qm hide` toggle the tracker HUD; `/qm banksync` runs
-`QM.Transfer.bankSync()` (needs the bank open); `/qm prep` prints the active tracked
-list's shortfall (`C.prepPlanPrint`, backed by `T.plan`) to chat, one line per short
-item — the same report the Tracker tab's **Prep** button shows in a read-only dialog;
+`QM.Transfer.bankSync()` (needs the bank open — the **Restock** button above the bank
+frame and the `QUARTERMASTER_RESTOCK` key binding reach the same call without typing, and
+the button's tooltip previews what it would pull via `T.bankPreview`); `/qm prep` prints
+the active tracked list's shortfall (`C.prepPlanPrint`, backed by `T.plan`) to chat, one
+line per short item — the same report the Tracker tab's **Prep** button shows in a
+read-only dialog; `/qm buffs` prints every buff on the player beside each tracked row's
+match rule and a live verdict (the diagnostic for "the buff is up, why is the row grey");
+`/qm presets` lists the role presets;
 `/qm mailsync dump` / `/qm mailsync
 <character> [list]` run the Transfer mail sync (list defaults to that character's
 `activeProfile`; both need the mail window open); `/qm mailtest <recipient>
@@ -329,10 +370,12 @@ lives on that feature's own tab.
 
 Tabs: **Display** (registered in [Consumables.lua](Consumables.lua) since the tracker
 HUD is the bulk of it) — HUD appearance/placement, and the notification strip's look +
-master switch. Includes a **show-buff-ids** toggle that hooks the GameTooltip buff
+master switch. Carries the **Show HUD** picker (`options.hudShowIn`) next to Lock frames
+and the master hide. Includes a **show-buff-ids** toggle that hooks the GameTooltip buff
 methods to inject each buff's spell id (and an equipped weapon's temp-enchant id) into
 tooltips, as a discovery aid for typing Track match ids. **Tracker** (the unified item
-list, profile switcher, row order, low-duration, don't-reuse, and the consumable
+list, profile switcher — whose drop also carries the **role presets** below a divider,
+see [Presets.lua](Presets.lua) — row order, low-duration, don't-reuse, and the consumable
 notification triggers). **Repair** (auto-repair, durability threshold, low-repair
 trigger). **Transfer** (registered in [Transfer.lua](Transfer.lua) — the transferable
 list plus recipient management and the tracked/transferable-overage sync options; the
@@ -439,9 +482,14 @@ comment must tell the reader something the code itself does not.
    longer anchor-derived. Fix: derive width from `GetRight() - GetLeft()` (guard both
    non-nil) instead of trusting `GetWidth()` on an anchor-only-sized source frame.
 
-> **No Lua compiler/interpreter is available here** (same as the other addons) — there
-> is no offline lint/run step. Verify by reading the code and loading it in-game.
-> (XML *well-formedness*, though, you can check offline — see gotcha #5.)
+> **Offline checks: syntax only, and no way to RUN the code.** There is no Lua
+> interpreter on this machine, but `pip install luaparser` gives a pure-Python parser that
+> catches syntax errors in every `.lua` file — worth doing before claiming a change is
+> good, since CI runs `luac5.1 -p` and will fail on the same things. XML
+> *well-formedness* is checkable too (`[xml](Get-Content file.xml -Raw)`, see gotcha #5),
+> and `./pack.ps1` is a real smoke test of the `.toc` file list. None of that catches a
+> *runtime* error (a nil global, a bad API signature, a load-order mistake) — for those,
+> read the code and load it in-game.
 
 ## Reference addons (siblings in this `Interface/AddOns`)
 
