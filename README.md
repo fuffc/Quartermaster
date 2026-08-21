@@ -149,9 +149,10 @@ notification strip.
 - **HUD appearance:** *HUD scale* and *Background* sliders, a *Show HUD border* toggle, a
   *progress bar texture* picker (previews each candidate live on its own face), and a
   9-point *HUD anchor* picker. *Background* runs from 0% (fully transparent, so only the
-  rows show) to 100%. Turning both the background and the border off can't lose you the
-  HUD: whenever you're placing frames — this panel open **and** frames unlocked — both
-  come back to visible so there's something to grab.
+  rows show) to 100% (solid). Turning the border off drops it entirely and the background
+  fills the frame edge to edge. Neither can lose you the HUD: whenever you're placing
+  frames — this panel open **and** frames unlocked — both come back to visible so there's
+  something to grab.
 - **Notifications:** master *Enable notifications* toggle, *display time* and *font size*
   sliders, a 9-point *notify anchor* picker, and a **Show test notifications** button.
 

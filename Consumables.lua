@@ -813,11 +813,27 @@ local function hudTop()
 	return (QM.db and QM.db.options.hudHeader == false) and HUD_TOP_BARE or HUD_TOP
 end
 
+-- bgFile is WHITE8X8, not the usual UI-Tooltip-Background: that tile carries its own alpha,
+-- so SetBackdropColor's alpha multiplies against it and the backdrop tops out translucent --
+-- options.hudBgAlpha = 1 could never actually reach opaque. Against a pure-white, fully
+-- opaque texture the colour+alpha we pass IS the rendered result. (pfUI backdrops the same
+-- way, and for the same reason.) The border stays the tooltip art -- it's only ever drawn at
+-- a fixed alpha, so it has nothing to be exact about.
 local HUD_BACKDROP = {
-	bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+	bgFile = "Interface\\Buttons\\WHITE8X8",
 	edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-	tile = true, tileSize = 16, edgeSize = 12,
+	tile = false, tileSize = 0, edgeSize = 12,
 	insets = { left = 3, right = 3, top = 3, bottom = 3 },
+}
+
+-- The borderless variant is a separate backdrop, not just a transparent edge colour: the
+-- insets above hold the background 3px short of the frame edge to make room for the border
+-- art, so merely hiding the border would leave a see-through rim and the background still
+-- wouldn't read as opaque. No edgeFile, no insets -- the fill reaches the edge.
+local HUD_BACKDROP_NOBORDER = {
+	bgFile = "Interface\\Buttons\\WHITE8X8",
+	tile = false, tileSize = 0,
+	insets = { left = 0, right = 0, top = 0, bottom = 0 },
 }
 
 -- Selectable progress-bar textures (General tab); options.barTexture indexes this.
@@ -1472,13 +1488,21 @@ function QM.applyHudChrome()
 	local f = QM.mainFrame
 	if not (f and QM.db) then return end
 	local o = QM.db.options
-	local bg, border = o.hudBgAlpha or 0.6, (o.hudBorder ~= false) and 0.5 or 0
+	local bg = o.hudBgAlpha or 0.6
+	local wantBorder = (o.hudBorder ~= false)
 	if QM.placingFrames() then
 		if bg < PLACING_MIN_BG then bg = PLACING_MIN_BG end
-		border = 0.6
+		wantBorder = true
+	end
+	-- SetBackdrop resets the backdrop's colours, so only swap when the variant actually
+	-- changes (and always re-apply the colours below, which a swap has just cleared).
+	local want = wantBorder and HUD_BACKDROP or HUD_BACKDROP_NOBORDER
+	if f.qmBackdrop ~= want then
+		f:SetBackdrop(want)
+		f.qmBackdrop = want
 	end
 	f:SetBackdropColor(0, 0, 0, bg)
-	f:SetBackdropBorderColor(1, 1, 1, border)
+	if wantBorder then f:SetBackdropBorderColor(1, 1, 1, 0.5) end
 end
 
 -- Toggle the tracker HUD (slash /qm show|hide, and the General-tab check). One place so
@@ -1539,13 +1563,13 @@ QM.subscribe("LOCK_CHANGED",      function() renderHUD() end)
 -- Placement mode gates both the Show HUD rule and the forced-visible chrome.
 QM.subscribe("CONFIG_TOGGLED",    function() QM.applyHudChrome(); renderHUD() end)
 
--- Give the main HUD its backdrop + a lock cue (faint border while unlocked, so it can be
--- found and dragged; subtle once locked). The frame exists by DB_READY (XML OnLoad ran);
--- Core registered it as a moveable but with no onLock, so we attach one here.
+-- Size the main HUD and give it its grip + chrome. The frame exists by DB_READY (XML OnLoad
+-- ran); Core registered it as a moveable but with no onLock, so we attach one here. The
+-- backdrop itself belongs to QM.applyHudChrome (called at the end), which picks the bordered
+-- or borderless variant -- setting one here too would just be a second owner to keep in sync.
 QM.subscribe("DB_READY", function()
 	local f = QM.mainFrame
 	if not f then return end
-	f:SetBackdrop(HUD_BACKDROP)
 	f:SetWidth((QM.db.frames.main and QM.db.frames.main.width) or 220)
 	-- Resizability is armed ONLY during an active grip-resize (below), never permanently:
 	-- a resizable frame's native size subsystem reconciles size on StopMovingOrSizing -- which
@@ -1577,9 +1601,9 @@ QM.subscribe("DB_READY", function()
 		QM.applyHudChrome()
 		if fr.qmGrip then if locked then fr.qmGrip:Hide() else fr.qmGrip:Show() end end
 	end
-	-- Core's DB_READY handler runs before this one (it subscribes at load, and Core loads
-	-- first), so its applyFrameLayout found qmOnLock still nil -- nothing has painted the
-	-- backdrop colour yet. Do it here, now that the hook exists.
+	-- Also the frame's first backdrop. Core's DB_READY handler runs before this one (it
+	-- subscribes at load, and Core loads first), so its applyFrameLayout found qmOnLock still
+	-- nil and nothing has painted the chrome yet. Do it here, now that the hook exists.
 	QM.applyHudChrome()
 
 	-- Fast repaint for short cooldowns: the 0.5s TICK is too coarse to animate a 3s bar, so
@@ -1981,11 +2005,11 @@ QM.registerConfigTab({
 			end,
 			function() return QM.db.frames.main.scale end,
 			function(v) return string.format("%.2f", v) end)
+		-- Second column, carrying the same +8 inset the scale slider has over col1 (a slider's
+		-- track sits inside its frame, so matching a checkbox's x would read as misaligned).
 		-- Background + border both force back to visible while placing frames, so 0% / no
-		-- border can't strand the HUD unfindable (see QM.applyHudChrome). Placed beside the
-		-- scale slider rather than at L.col2: a slider is 170 wide, so col2 (300) would run
-		-- past the 456-wide page; 16 + 170 + a 24 gap clears it.
-		QM.Config.slider(page, "QuartermasterHudBgAlpha", "Background", 0, 1, 0.05, 210, L.y - 14,
+		-- border can't strand the HUD unfindable (see QM.applyHudChrome).
+		QM.Config.slider(page, "QuartermasterHudBgAlpha", "Background", 0, 1, 0.05, L.col2 + 8, L.y - 14,
 			function(v) QM.db.options.hudBgAlpha = v; QM.applyHudChrome() end,
 			function() return QM.db.options.hudBgAlpha end,
 			function(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end)

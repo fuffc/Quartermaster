@@ -286,7 +286,9 @@ QuartermasterDB = {
               hudHidden, hudHeader, showTargetCount, showItemName, abbreviateNames, hudOutline,
               hudBgAlpha, hudBorder,   -- HUD backdrop opacity + border toggle; both are
                                        -- forced visible while placing frames, so a 0%/
-                                       -- borderless HUD can't become unfindable.
+                                       -- borderless HUD can't become unfindable. Painted by
+                                       -- QM.applyHudChrome, the ONLY owner of the HUD's
+                                       -- backdrop (it picks the bordered/borderless variant).
               barTexture,                          -- index into Consumables' BAR_TEXTURES
               buffLowDuration, showBuffIds, guardReuse,
               transfer = { dumpTrackedOverage,      -- /qm restock also banks tracked overage
@@ -485,6 +487,15 @@ comment must tell the reader something the code itself does not.
    from that point on, surviving resize/reopen/reload, since the target frame is no
    longer anchor-derived. Fix: derive width from `GetRight() - GetLeft()` (guard both
    non-nil) instead of trusting `GetWidth()` on an anchor-only-sized source frame.
+
+7. **`Interface\Tooltips\UI-Tooltip-Background` can never render fully opaque.** The tile
+   carries its own alpha, so `SetBackdropColor`'s alpha multiplies against it and a backdrop
+   using it tops out translucent however high you go. Where the alpha has to be exact
+   (anything user-configurable), use `Interface\Buttons\WHITE8X8` with `tile = false` -- a
+   pure-white opaque texture, so the colour+alpha passed IS the rendered result. pfUI
+   backdrops this way for the same reason. Watch the `insets` too: they hold the fill short
+   of the frame edge to make room for border art, so a *borderless* variant wants
+   `insets = 0` or it keeps a see-through rim.
 
 > **Offline checks: syntax only, and no way to RUN the code.** There is no Lua
 > interpreter on this machine, but `pip install luaparser` gives a pure-Python parser that
