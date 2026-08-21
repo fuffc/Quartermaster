@@ -424,10 +424,19 @@ function QM.itemMatchEffective(id, apply)
 		end
 		return nil
 	end
-	if match then return match end
+	-- A rule whose capability this client lacks (by="id" needs SuperWoW) can never resolve, so
+	-- honouring it would peg the row at "never up" forever. setItemMatch already refuses to
+	-- STORE one, but the SEED bypasses the setter -- fall through to the icon default instead.
+	if match and QM.itemMatchAvailable(match.by) then return match end
 	local track = metaField(id, "track") or QM.TRACK_STOCK
 	if track == QM.TRACK_BUFF or track == QM.TRACK_FOOD then
+		-- The seed icon when there is one, else the item's live texture, so a hand-added item
+		-- still gets the buff-icon-equals-item-icon default rather than no rule at all.
 		local icon = metaField(id, "icon")
+		if not icon then
+			local _, _, _, _, _, _, _, _, tex = GetItemInfo("item:" .. id)   -- texture is the 9th return
+			icon = tex
+		end
 		if icon then return { by = "icon", value = icon } end
 	end
 	return nil
