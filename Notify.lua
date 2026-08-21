@@ -224,12 +224,21 @@ end
 -- Frame hooks (Quartermaster_Notify in the XML) + config tab
 -- ---------------------------------------------------------------------------
 
--- Lock cue: a faint grab box + handle while unlocked (so it can be positioned),
--- fully transparent once locked so only the notification lines show. The handle is
--- aligned to the notification anchor edge to preview where lines will appear.
-local function onLock(frame, locked)
-	frame:SetBackdropColor(0, 0, 0, locked and 0 or 0.6)
-	frame:SetBackdropBorderColor(1, 1, 1, locked and 0 or 0.5)
+-- The dock's own chrome: a faint grab box + handle marking where lines will appear. Shown only
+-- while placing frames (QM.placingFrames -- panel open AND unlocked, so the dock is findable
+-- exactly when it can actually be dragged), and fully transparent otherwise so only the
+-- notification lines show. Being merely unlocked is deliberately not enough: that is a state
+-- people sit in indefinitely, and the box would just park on screen forever.
+--
+-- Mouse follows visibility: an invisible dock must NOT keep eating clicks in that patch of
+-- screen, which a 240x40 transparent frame would. This runs after applyFrameLock's own
+-- EnableMouse, so it is the value that sticks. The handle is aligned to the notification
+-- anchor edge to preview the growth direction.
+local function onLock(frame)
+	local placing = QM.placingFrames()
+	frame:SetBackdropColor(0, 0, 0, placing and 0.6 or 0)
+	frame:SetBackdropBorderColor(1, 1, 1, placing and 0.5 or 0)
+	frame:EnableMouse(placing)
 	local handle = getglobal(frame:GetName() .. "Handle")
 	if handle then
 		local anchor, justify = N.alignment()
@@ -237,9 +246,15 @@ local function onLock(frame, locked)
 		handle:ClearAllPoints()
 		handle:SetPoint(anchor, frame, anchor, px, py)
 		handle:SetJustifyH(justify)
-		if locked then handle:Hide() else handle:Show() end
+		if placing then handle:Show() else handle:Hide() end
 	end
 end
+
+-- Placement mode depends on the panel as well as the lock, so refresh on both edges.
+QM.subscribe("CONFIG_TOGGLED", function()
+	local f = getglobal("Quartermaster_Notify")
+	if f then onLock(f) end
+end)
 
 function Quartermaster_Notify_OnLoad()
 	this:SetBackdrop(NOTIFY_BACKDROP)

@@ -1998,6 +1998,14 @@ local function build()
 	-- without pressing Enter or tabbing away first -- see QM.Config.editbox.
 	panel:SetScript("OnHide", function()
 		if QM.Config._focusedEditBox then QM.Config._focusedEditBox:ClearFocus() end
+		QM.configOpen = false
+		QM.fire("CONFIG_TOGGLED")
+	end)
+	-- Placement mode is tracked from the frame's own OnShow/OnHide, not toggleConfig -- the
+	-- close button and Escape bypass that function entirely.
+	panel:SetScript("OnShow", function()
+		QM.configOpen = true
+		QM.fire("CONFIG_TOGGLED")
 	end)
 
 	local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")

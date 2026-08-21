@@ -71,7 +71,6 @@ end
 local defaults = {
 	options = {
 		locked          = false,
-		showWhenSolo    = true,
 		autoRepair      = true,
 		repairThreshold = 35,    -- warn when worst item durability % is below this
 		reagentRestock  = true,
@@ -84,6 +83,8 @@ local defaults = {
 		},
 		-- In-raid tracker HUD (Quartermaster_Main) display options (General tab).
 		hudHidden       = false, -- master hide of the tracker HUD
+		hudShowIn       = "always", -- when the HUD is allowed on screen: "always" | "group"
+		                            -- (party or raid) | "raid" | "instance" | "raidInstance"
 		showTargetCount = true,  -- HUD count column shows "have/target" vs just "have"
 		showItemName    = true,  -- HUD shows the item-name column
 		abbreviateNames = false, -- shorten overlong names (words to initials) to fit the column
@@ -732,6 +733,18 @@ function QM.mouseDown(button)
 	return IsMouseButtonDown(button) and true or false
 end
 
+-- Placement mode: are the moveable frames being arranged right now? BOTH conditions have to
+-- hold -- the config panel is open AND frames are unlocked -- because each alone is a state
+-- people sit in for hours (unlocked alone parked the HUD on screen outside a raid, which is
+-- exactly what the Show HUD gate exists to prevent; panel-open alone did the same while
+-- configuring anything at all). Together they read as deliberate intent, so while placing, a
+-- suppressed HUD still shows and the notify dock paints its chrome; otherwise both obey their
+-- own rules.
+function QM.placingFrames()
+	if not (QM.configOpen and QM.db) then return false end
+	return not QM.db.options.locked
+end
+
 function Quartermaster_FrameDragStart()
 	if QM.db and QM.db.options.locked then return end
 	this.qmMoving = true
@@ -810,6 +823,14 @@ end
 
 QM.on("VARIABLES_LOADED", function()
 	QuartermasterDB = QuartermasterDB or {}
+	-- The (never exposed) solo gate became the hudShowIn mode. Convert BEFORE the defaults
+	-- merge: afterwards hudShowIn is always set, so a carried-over value would be
+	-- indistinguishable from the default. showWhenSolo = false meant "only when grouped".
+	local opt = QuartermasterDB.options
+	if opt then
+		if opt.showWhenSolo == false and not opt.hudShowIn then opt.hudShowIn = "group" end
+		opt.showWhenSolo = nil
+	end
 	applyDefaults(QuartermasterDB, defaults)
 	for _, c in pairs(QuartermasterDB.chars) do migrateChar(c) end
 	QM.db = QuartermasterDB

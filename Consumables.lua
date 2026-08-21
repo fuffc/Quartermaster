@@ -1258,9 +1258,43 @@ local function paintHudRow(row, d)
 	row:Show()
 end
 
+local function inRaid()
+	return (GetNumRaidMembers() and GetNumRaidMembers() > 0) and true or false
+end
+
 local function inGroup()
-	return (GetNumRaidMembers() and GetNumRaidMembers() > 0)
-		or (GetNumPartyMembers() and GetNumPartyMembers() > 0)
+	return inRaid() or ((GetNumPartyMembers() and GetNumPartyMembers() > 0) and true or false)
+end
+
+-- IsInInstance's second return ("party"/"raid"/"pvp"/"arena"/"none"), or nil where the API is
+-- absent. Guarded because an absent one would otherwise strand the HUD hidden permanently --
+-- without it the instance modes fall back to their nearest group equivalent below.
+local function instanceKind()
+	if type(IsInInstance) ~= "function" then return nil end
+	local inside, kind = IsInInstance()
+	if not inside then return "none" end
+	return kind or "none"
+end
+
+-- Is the HUD suppressed by options.hudShowIn? Separate from the master hudHidden switch.
+-- The group tests answer "who am I with", which is true the moment you join a raid and stays
+-- true in a city, and false when you solo into an instance -- a different question from "am I
+-- actually in there", hence both axes.
+local function outOfContext()
+	local mode = QM.db.options.hudShowIn or "always"
+	if mode == "raid"  then return not inRaid() end
+	if mode == "group" then return not inGroup() end
+	if mode == "instance" or mode == "raidInstance" then
+		local kind = instanceKind()
+		if not kind then
+			-- No IsInInstance: fall back to the nearest group test rather than suppress forever.
+			if mode == "raidInstance" then return not inRaid() end
+			return not inGroup()
+		end
+		if mode == "raidInstance" then return kind ~= "raid" end
+		return kind == "none"
+	end
+	return false
 end
 
 -- Live re-abbreviate the shown item rows during a WIDTH resize: a text-only pass (no SetPoint /
@@ -1288,8 +1322,7 @@ local function renderHUD(data)
 	if not f or not QM.db then return end
 	if f.qmMoving then return end   -- don't re-layout mid drag/resize (1.12 CTD guard)
 	if QM.db.options.hudHidden then f:Hide(); return end
-	local locked = QM.db.options.locked
-	local soloHidden = (not inGroup()) and not QM.db.options.showWhenSolo
+	local ctxHidden = outOfContext()
 
 	local title = getglobal("Quartermaster_MainTitle")
 	if title then if QM.db.options.hudHeader == false then title:Hide() else title:Show() end end
@@ -1311,16 +1344,16 @@ local function renderHUD(data)
 	local repairAtTop    = wantRepairRow and (QM.db.options.hudRepairRowPos ~= "bottom")
 	local repairAtBottom = wantRepairRow and not repairAtTop
 
-	-- Hidden when there is nothing to show AND the frames are locked -- unless the
-	-- profile-switch or repair row is active, since an empty list shouldn't hide the
-	-- only control(s) still showing. The solo gate still hides regardless (a
-	-- separate suppression, not tied to the profile list). While unlocked the frame
-	-- stays up (even empty, with a placeholder) so it can be dragged into place.
-	if locked then
-		if soloHidden then f:Hide(); return end
+	-- Placement mode (QM.placingFrames: panel open AND unlocked) keeps the HUD up, empty if
+	-- need be, so it can be dragged into place. Outside it the Show HUD gate wins outright --
+	-- header, placeholder and all -- and an empty list hides too, unless the profile-switch or
+	-- repair row is active, since that shouldn't hide the only control(s) still showing.
+	local placing = QM.placingFrames()
+	if not placing then
+		if ctxHidden then f:Hide(); return end
 		if n == 0 and not wantProfileRow and not wantRepairRow then f:Hide(); return end
 	end
-	if soloHidden and not locked then n = 0 end   -- show the empty placeholder for placement only
+	if ctxHidden and placing then n = 0 end   -- show the empty placeholder for placement only
 
 	-- Rows have variable height (short separators vs full rows), so they're stacked with a
 	-- running y offset rather than a fixed per-index pitch.
@@ -1485,6 +1518,7 @@ QM.subscribe("DESIRED_CHANGED",   function() renderHUD() end)
 QM.subscribe("INVENTORY_UPDATED", function() renderHUD() end)
 QM.subscribe("ITEM_META_CHANGED", function() renderHUD() end)
 QM.subscribe("LOCK_CHANGED",      function() renderHUD() end)
+QM.subscribe("CONFIG_TOGGLED",    function() renderHUD() end)   -- placement mode gates the Show HUD rule
 
 -- Give the main HUD its backdrop + a lock cue (faint border while unlocked, so it can be
 -- found and dragged; subtle once locked). The frame exists by DB_READY (XML OnLoad ran);
@@ -1812,6 +1846,22 @@ QM.registerConfigTab({
 		L.checks(
 			{ "Lock frames", function(on) QM.setLocked(on) end, function() return QM.db.options.locked end },
 			{ "Hide the tracker HUD", function(on) QM.setHudHidden(on) end, function() return QM.db.options.hudHidden end })
+
+		-- Soft gate (the checkbox above is the hard master switch): while placing frames -- this
+		-- panel open AND frames unlocked -- the HUD shows regardless, so it can still be
+		-- positioned out of a raid. The group modes answer "who am I with", the instance modes
+		-- "am I actually in there"; both axes are offered since they differ (a raid group in a
+		-- city, a solo trip into an instance).
+		local showInBtn = QM.Config.dropButton(page, {
+			width = 220, height = 20, menuWidth = 220, prefix = "Show HUD",
+			values = { "always", "group", "raid", "instance", "raidInstance" },
+			labels = { always = "Always", group = "In a party or raid", raid = "In a raid group",
+			           instance = "In any instance", raidInstance = "In a raid instance" },
+			onSelect = function(v) QM.db.options.hudShowIn = v; renderHUD() end,
+			get      = function() return QM.db.options.hudShowIn or "always" end,
+		})
+		showInBtn:SetPoint("TOPLEFT", page, "TOPLEFT", L.col1 + 4, L.y - 1)
+		L.advance(26)
 
 		L.section("HUD content")
 		L.checks(
