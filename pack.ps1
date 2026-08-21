@@ -8,7 +8,11 @@ $tocFiles = Get-Content $tocPath | Where-Object {
     $_.Trim() -ne "" -and -not $_.Trim().StartsWith("##")
 } | ForEach-Object { Join-Path $scriptPath $_.Trim() }
 
-$files = @($tocPath) + $tocFiles
+# Bindings.xml is loaded by the client on filename alone and so is deliberately NOT a .toc
+# entry -- it has to be named here or a release would ship without the key binding.
+$bindingsPath = Join-Path $scriptPath "Bindings.xml"
+
+$files = @($tocPath, $bindingsPath) + $tocFiles
 
 $texturesDir = Join-Path $scriptPath "textures"
 $zipFilePath = Join-Path $scriptPath "Quartermaster.zip"

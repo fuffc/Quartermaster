@@ -1,0 +1,5 @@
+<Bindings>
+	<Binding name="QUARTERMASTER_RESTOCK" header="QUARTERMASTER">
+		Quartermaster.Transfer.bankSync()
+	</Binding>
+</Bindings>

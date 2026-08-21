@@ -432,6 +432,96 @@ QM.on("BANKFRAME_CLOSED", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Bank-frame Restock button (the no-typing entry point to T.bankSync)
+-- ---------------------------------------------------------------------------
+
+-- What a sync would PULL from the bank: { { id, name, amount }, ... }. Only the top-up half
+-- of T.bankSync -- that is what a "restock" preview should promise, and the banking half
+-- depends on options the tooltip has no room to explain.
+function T.bankPreview()
+	local rows, out = T.plan(QM.charKey(), "consumables"), {}
+	for i = 1, table.getn(rows) do
+		if rows[i].fromBank > 0 then
+			table.insert(out, { id = rows[i].id, name = rows[i].name, amount = rows[i].fromBank })
+		end
+	end
+	return out
+end
+
+-- Built on first bank open, not at load: Config.lua (QM.Config.button) comes after this file
+-- in the .toc, so the widget helpers don't exist yet when this module runs.
+local function buildBankButton()
+	if T.bankButton then return T.bankButton end
+	if not (BankFrame and QM.Config and QM.Config.button) then return nil end
+	local b = QM.Config.button(BankFrame, "Restock", function() T.bankSync() end)
+	b:SetWidth(90)
+	-- Above the bank frame's top-right corner: clear of the bag slots and the close button,
+	-- so it can never cover a bank slot whatever the frame's size.
+	b:SetPoint("BOTTOMRIGHT", BankFrame, "TOPRIGHT", -14, 2)
+	b:SetFrameStrata("HIGH")
+	-- Keep styleFlatButton's border hover-brighten, which setting OnEnter/OnLeave replaces.
+	b:SetScript("OnEnter", function()
+		this:SetBackdropBorderColor(0.9, 0.8, 0.2, 1)
+		GameTooltip:SetOwner(this, "ANCHOR_LEFT")
+		GameTooltip:SetText("Restock from bank")
+		local rows = T.bankPreview()
+		local n = table.getn(rows)
+		if n == 0 then
+			GameTooltip:AddLine("Nothing short on '" .. QM.activeProfile() .. "'", 0.6, 0.6, 0.6, true)
+		else
+			GameTooltip:AddLine("Pulls toward Target on '" .. QM.activeProfile() .. "':", 0.7, 0.7, 0.7, true)
+			-- A long list would run off the screen, so show the first few and count the rest.
+			local shown = n < 10 and n or 10
+			for i = 1, shown do
+				GameTooltip:AddLine(rows[i].amount .. "x " .. (rows[i].name or ("item " .. rows[i].id)), 1, 1, 1)
+			end
+			if n > shown then GameTooltip:AddLine("... and " .. (n - shown) .. " more", 0.6, 0.6, 0.6) end
+		end
+		GameTooltip:AddLine(" ")
+		GameTooltip:AddLine("Also banks anything over Target/Keep, per the Transfer tab.", 0.5, 0.5, 0.5, true)
+		GameTooltip:Show()
+	end)
+	b:SetScript("OnLeave", function()
+		this:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
+		GameTooltip:Hide()
+	end)
+	T.bankButton = b
+	return b
+end
+
+-- Dim the label when there is nothing to pull, so the button reads at a glance.
+function T.refreshBankButton()
+	local b = T.bankButton
+	if not (b and b:IsShown()) then return end
+	if table.getn(T.bankPreview()) > 0 then
+		b.label:SetTextColor(1, 0.82, 0)
+	else
+		b.label:SetTextColor(0.6, 0.6, 0.6)
+	end
+end
+
+QM.on("BANKFRAME_OPENED", function()
+	local b = buildBankButton()
+	if b then b:Show(); T.refreshBankButton() end
+end)
+
+QM.on("BANKFRAME_CLOSED", function()
+	if T.bankButton then T.bankButton:Hide() end
+end)
+
+-- Both the preview and the dim state are derived from counts, so keep them honest as the
+-- sync itself moves things.
+QM.subscribe("INVENTORY_UPDATED", function()
+	if QM.bankOpen then T.refreshBankButton() end
+end)
+
+-- Key binding. Bindings.xml calls Quartermaster.Transfer.bankSync directly (the client
+-- auto-loads that file by name; it is deliberately not a .toc entry). These name it in the
+-- Key Bindings UI.
+BINDING_HEADER_QUARTERMASTER = "Quartermaster"
+BINDING_NAME_QUARTERMASTER_RESTOCK = "Restock tracked consumables from bank"
+
+-- ---------------------------------------------------------------------------
 -- Mail sequencer (one item per mail)
 -- ---------------------------------------------------------------------------
 
