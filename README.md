@@ -107,6 +107,7 @@ config panel.
 | `/qm` or `/qm config` | Toggle the config panel. |
 | `/qm lock` / `/qm unlock` | Lock or unlock all moveable frames (HUD, notification strip) against dragging. |
 | `/qm show` / `/qm hide` | Show or hide the tracker HUD. |
+| `/qm reset` | Put the HUD and notification strip back to their default position, anchor, scale and width. The way back from a frame dragged off-screen; same as the Display tab's **Reset frame positions** button. |
 | `/qm restock` | Top up this character's tracked-list shortfall from an **open bank**, then (by default) bank any tracked-list overage and any bankable item on the Transfer list. Requires the bank window open. Also reachable without typing: the **Restock** button above the bank frame, or a key binding (*Key Bindings → Quartermaster → Restock tracked consumables from bank*). |
 | `/qm banksync` | The original name for `/qm restock`. Still works, and always will. |
 | `/qm buffs` | Print every buff currently on you (name, icon, spell id) beside each tracked row's match rule and whether it resolves right now. The diagnostic for "the buff is up, so why is that row grey?". |
@@ -130,13 +131,16 @@ notification strip.
 
 ![The Display tab](docs/display-tab.png)
 
-- **Frames:** *Lock frames*, *Hide the tracker HUD*, and **Show HUD** — when the HUD is
+- **Frames:** *Lock frames*, *Hide the tracker HUD*, **Reset frame positions**, and
+  **Show HUD** — when the HUD is
   allowed on screen at all: *Always*, *In a party or raid*, *In a raid group*, *In any
   instance*, or *In a raid instance*. The group options ask "who am I with" (true the
   moment you join a raid, still true in a city); the instance ones ask "am I actually in
   there". This is a soft gate: while you have this panel open **and** frames unlocked, the
   HUD shows regardless so you can position it. *Hide the tracker HUD* stays the hard
-  master switch.
+  master switch. *Reset frame positions* (also `/qm reset`) puts both frames back to their
+  defaults — anchor, offset, scale and width — for when one has ended up somewhere you
+  can't grab it.
 - **HUD content:** *Show HUD header*, *Show item name*, *Abbreviate names to fit*, *Show
   target count (have/target)*, *Outline HUD text*, *Show buff/enchant IDs on tooltips*
   (a discovery aid for typing an exact match ID in the gear popup — see below).

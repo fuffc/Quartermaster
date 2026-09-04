@@ -1560,6 +1560,8 @@ QM.subscribe("DESIRED_CHANGED",   function() renderHUD() end)
 QM.subscribe("INVENTORY_UPDATED", function() renderHUD() end)
 QM.subscribe("ITEM_META_CHANGED", function() renderHUD() end)
 QM.subscribe("LOCK_CHANGED",      function() renderHUD() end)
+-- A move or a reset can change the HUD's width, which the bar widths are derived from.
+QM.subscribe("FRAME_MOVED",       function() renderHUD() end)
 -- Placement mode gates both the Show HUD rule and the forced-visible chrome.
 QM.subscribe("CONFIG_TOGGLED",    function() QM.applyHudChrome(); renderHUD() end)
 
@@ -1958,6 +1960,15 @@ QM.registerConfigTab({
 			get      = function() return QM.db.options.hudShowIn or "always" end,
 		})
 		showInBtn:SetPoint("TOPLEFT", page, "TOPLEFT", L.col1 + 4, L.y - 1)
+
+		-- The only way back from a frame dragged off-screen or scaled to nothing, short of
+		-- editing SavedVariables; /qm reset reaches the same call when this panel can't be found.
+		local resetBtn = QM.Config.button(page, "Reset frame positions", function()
+			QM.Config.confirm("Reset the HUD and notification frames to their default position, scale and width?",
+				function() QM.resetFrames() end)
+		end)
+		resetBtn:SetWidth(BTN_W)
+		resetBtn:SetPoint("TOPLEFT", page, "TOPLEFT", COL2, L.y)
 		L.advance(26)
 
 		L.section("HUD content")

@@ -715,6 +715,27 @@ function QM.applyFrameLayout(frame)
 	QM.applyFrameLock(frame)
 end
 
+-- Put every registered frame back to its shipped default placement. The escape hatch for a
+-- frame dragged off-screen or shrunk to nothing, which is otherwise only recoverable by
+-- hand-editing SavedVariables: anchor, offset, scale AND width all go back, since "I can't
+-- find it" is usually some combination of the four. Height is never touched -- the HUD owns
+-- its own (see the height-ownership CTD rule).
+function QM.resetFrames()
+	if not QM.db then return end
+	for i = 1, table.getn(QM.moveables) do
+		local f = QM.moveables[i]
+		local d = layoutOf(f)
+		local def = f.qmLayoutKey and defaults.frames[f.qmLayoutKey]
+		if d and def then
+			d.point, d.x, d.y, d.scale, d.width = def.point, def.x, def.y, def.scale, def.width
+			if def.width then f:SetWidth(def.width) end
+			QM.applyFrameLayout(f)
+		end
+	end
+	QM.fire("FRAME_MOVED")
+	QM.print("frame positions reset")
+end
+
 -- Register a frame to follow the global lock + persist its position under
 -- QM.db.frames[layoutKey]. onLock(frame, locked) optionally repaints lock cues.
 -- Called from the frame's XML OnLoad (before the DB is ready), so the actual
@@ -884,6 +905,8 @@ SlashCmdList["QUARTERMASTER"] = function(rawmsg)
 	-- key binding); "banksync" is the original and stays a working alias.
 	elseif msg == "restock" or msg == "banksync" then
 		if QM.Transfer and QM.Transfer.bankSync then QM.Transfer.bankSync() end
+	elseif msg == "reset" then
+		QM.resetFrames()
 	elseif msg == "prep" then
 		if QM.Consumables and QM.Consumables.prepPlanPrint then QM.Consumables.prepPlanPrint() end
 	elseif string.find(msg, "^mailsync") then
@@ -922,7 +945,7 @@ SlashCmdList["QUARTERMASTER"] = function(rawmsg)
 	elseif msg == "" or msg == "config" then
 		if QM.toggleConfig then QM.toggleConfig() else QM.print("config panel not loaded") end
 	else
-		QM.print("commands: /qm (config)  |  /qm lock  |  /qm unlock  |  /qm show  |  /qm hide  |  /qm restock  |  /qm prep  |  /qm buffs  |  /qm presets  |  /qm mailsync")
+		QM.print("commands: /qm (config)  |  /qm lock  |  /qm unlock  |  /qm show  |  /qm hide  |  /qm reset  |  /qm restock  |  /qm prep  |  /qm buffs  |  /qm presets  |  /qm mailsync")
 	end
 end
 

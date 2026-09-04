@@ -251,7 +251,10 @@ global lock (`options.locked`) and persist its position under `frames[layoutKey]
 Because 1.12 mis-positions non-`TOPLEFT` anchors, frames are always pinned `TOPLEFT`
 with the offset derived from the user-facing anchor corner. XML drag routes through the
 lock-aware `Quartermaster_FrameDragStart`/`_Stop`. Layouts are (re)applied on `DB_READY`;
-locks on `LOCK_CHANGED`. The main HUD and notify area both use it. The **mail panel**
+locks on `LOCK_CHANGED`. `QM.resetFrames()` (Display tab's **Reset frame positions**,
+`/qm reset`) writes each registered frame's `frames[layoutKey]` back to the `defaults`
+table — point/x/y/scale/width, never height — and fires `FRAME_MOVED`; it's the only way
+back from a frame dragged off-screen short of editing SavedVariables. The main HUD and notify area both use it. The **mail panel**
 (`Quartermaster_Mail`) deliberately does not: it anchors live to Blizzard's own
 `MailFrame` (re-applied on every `MAIL_SHOW`) rather than a stored position, since a
 mailbox-relative anchor doesn't fit the UIParent-relative assumption the rest of the
@@ -360,7 +363,8 @@ the prep view still shows where stock is. `itemID` comes from parsing the item l
 ## Config (`/qm`)
 
 **Slash is intentionally minimal**: `/qm` / `/qm config` toggles the panel; `/qm lock` /
-`/qm unlock`; `/qm show` / `/qm hide` toggle the tracker HUD; `/qm restock` (alias
+`/qm unlock`; `/qm show` / `/qm hide` toggle the tracker HUD; `/qm reset` restores every
+moveable frame to its default placement (`QM.resetFrames`); `/qm restock` (alias
 `/qm banksync`, the original name, kept working) runs `QM.Transfer.bankSync()` — needs the
 bank open; the **Restock** button above the bank frame and the `QUARTERMASTER_RESTOCK` key
 binding reach the same call without typing, and the button's tooltip previews what it
@@ -386,8 +390,8 @@ lives on that feature's own tab.
 
 Tabs: **Display** (registered in [Consumables.lua](Consumables.lua) since the tracker
 HUD is the bulk of it) — HUD appearance/placement, and the notification strip's look +
-master switch. Carries the **Show HUD** picker (`options.hudShowIn`) next to Lock frames
-and the master hide. Includes a **show-buff-ids** toggle that hooks the GameTooltip buff
+master switch. Carries the **Show HUD** picker (`options.hudShowIn`) and **Reset
+frame positions** next to Lock frames and the master hide. Includes a **show-buff-ids** toggle that hooks the GameTooltip buff
 methods to inject each buff's spell id (and an equipped weapon's temp-enchant id) into
 tooltips, as a discovery aid for typing Track match ids. **Tracker** (the unified item
 list, profile switcher — whose drop also carries the **role presets** below a divider,
