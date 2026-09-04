@@ -884,17 +884,7 @@ local function isWeaponApply(apply)
 	return apply == "weapon" or apply == "mh" or apply == "oh"
 end
 
--- Human-readable account of the in-force match rule, so the status line can tell the user HOW
--- an effect is identified (which enchant id/name, or which buff).
-local function describeMatch(m)
-	if not m then return "nothing" end
-	if m.by == "enchantid"   then return "enchant id " .. tostring(m.value) end
-	if m.by == "enchantname" then return "enchant name '" .. tostring(m.value) .. "'" end
-	if m.by == "icon"        then return "the buff icon" end
-	if m.by == "name"        then return "buff name '" .. tostring(m.value) .. "'" end
-	if m.by == "id"          then return "buff id " .. tostring(m.value) end
-	return "nothing"
-end
+local describeMatch = QM.describeMatch
 
 -- The per-item buff/enchant tracking popup opened by a row's gear button (one instance
 -- per list editor, re-bound to whichever item's gear was clicked). Every field edits the
@@ -903,7 +893,7 @@ end
 -- the rule auto-confirms the moment its effect is seen in game (QM's passive validateTick).
 local function buildGearPopup(parent)
 	local p = CreateFrame("Frame", nil, parent)
-	p:SetWidth(236); p:SetHeight(166)
+	p:SetWidth(236); p:SetHeight(192)
 	p:SetBackdrop(PANEL_BACKDROP)
 	p:SetBackdropColor(0, 0, 0, 1)
 	p:SetBackdropBorderColor(0.9, 0.8, 0.2, 1)
@@ -1005,10 +995,27 @@ local function buildGearPopup(parent)
 	status:SetJustifyH("LEFT")
 	function p.setStatus(t) status:SetText(t or "") end
 
+	-- An icon rule is shown as the icon itself: the status line can name the file, but only the
+	-- art says at a glance that capture-on-use adopted the wrong buff. Reset drops the rule AND
+	-- its validated flag, so the item is free to learn again on the next use (the eat-learning
+	-- reset below does the same for a food's eating aura).
+	local matchIcon = p:CreateTexture(nil, "ARTWORK")
+	matchIcon:SetWidth(18); matchIcon:SetHeight(18)
+	matchIcon:Hide()
+	local matchReset = QM.Config.button(p, "Reset match", function()
+		if not p.id then return end
+		QM.setItemMatch(p.id, nil)
+		p.refreshFields()
+	end)
+	matchReset:SetWidth(100)
+	matchReset:SetPoint("TOPLEFT", status, "BOTTOMLEFT", 24, -2)
+	matchIcon:SetPoint("RIGHT", matchReset, "LEFT", -6, 0)
+	p.matchIcon = matchIcon
+
 	-- Food only: the auto-learned eating aura + eat time, with a per-item reset. Reset clears
 	-- just THIS food's learned eat data (eatMatch + eatTime); it re-learns on the next eat.
 	local eatLabel = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	eatLabel:SetPoint("TOPLEFT", status, "BOTTOMLEFT", 0, -12)
+	eatLabel:SetPoint("TOPLEFT", matchReset, "BOTTOMLEFT", -24, -10)
 	eatLabel:SetPoint("RIGHT", p, "RIGHT", -10, 0)
 	eatLabel:SetJustifyH("LEFT")
 	local eatReset = QM.Config.button(p, "Reset eat learning",
@@ -1034,6 +1041,11 @@ local function buildGearPopup(parent)
 		local id = p.id; if not id then return end
 		local eff = QM.itemMatchEffective(id, p.apply)
 		local st = QM.itemMatchStatus(id, p.apply)
+		if eff and eff.by == "icon" and eff.value then
+			matchIcon:SetTexture(eff.value); matchIcon:Show()
+		else
+			matchIcon:Hide()
+		end
 		if st == "validated" then
 			status:SetTextColor(0.4, 0.9, 0.4); p.setStatus("validated -- " .. describeMatch(eff))
 		elseif st == "pending" then
@@ -1075,7 +1087,7 @@ local function buildGearPopup(parent)
 		end
 		p.refreshStatus()
 		p.refreshEat()
-		p:SetHeight((meta.track == "food") and 214 or 166)
+		p:SetHeight((meta.track == "food") and 240 or 192)
 	end
 
 	function p.bindTo(id, apply)

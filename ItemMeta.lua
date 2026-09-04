@@ -478,6 +478,22 @@ function QM.itemMatchStatus(id, apply)
 	return "pending"
 end
 
+-- Human-readable account of a match rule, for the gear popup's status line and the notice
+-- raised when one is learned. An icon rule names the icon FILE: "the buff icon" alone doesn't
+-- say which, and a capture-on-use that adopted the wrong buff is only obvious once it does.
+function QM.describeMatch(m)
+	if not m then return "nothing" end
+	if m.by == "enchantid"   then return "enchant id " .. tostring(m.value) end
+	if m.by == "enchantname" then return "enchant name '" .. tostring(m.value) .. "'" end
+	if m.by == "name"        then return "buff name '" .. tostring(m.value) .. "'" end
+	if m.by == "id"          then return "buff id " .. tostring(m.value) end
+	if m.by == "icon" then
+		local _, _, base = string.find(tostring(m.value or ""), "([^\\]+)$")
+		return base and ("buff icon " .. base) or "the buff icon"
+	end
+	return "nothing"
+end
+
 -- ---- effect-present probes (shared tooltip/aura scan helpers) -----------------
 local scanTip
 
@@ -698,25 +714,30 @@ function QM.playerBuffIconSet()
 	return set
 end
 
--- Capture-on-use for a self/target consumable: the ONE buff icon that appeared since `before`
--- is this item's effect, so adopt it as an explicit icon rule. Only adopts when exactly one is
--- new -- a second buff landing in the same window (a raid buff alongside the elixir) is
--- ambiguous, and a wrong rule is worse than no rule. Returns the learned icon, or nil.
+-- Capture-on-use for a self/target consumable: the ONE buff that appeared since `before` is
+-- this item's effect, so adopt it as an explicit rule. Only adopts when exactly one is new --
+-- a second buff landing in the same window (a raid buff alongside the elixir) is ambiguous,
+-- and a wrong rule is worse than no rule; the caller keeps that window tight for the same
+-- reason. Prefers the buff's SPELL ID wherever this client can read one: an icon is not an
+-- identity (every food's Well Fed shares one), so an icon rule lights up every row that shares
+-- it. Returns the learned { by, value }, or nil.
 -- The self-buff counterpart of learnWeaponEnchant's capture-on-apply.
 function QM.learnSelfBuff(id, before)
 	if not (id and before and GetPlayerBuffTexture) then return nil end
-	local found
+	local tex, index
 	for i = 0, MAX_BUFF_SLOT do
 		local bi = helpfulBuffAt(i)
-		local tex = bi and GetPlayerBuffTexture(bi)
-		if tex and not before[string.lower(tex)] then
-			if found then return nil end   -- two new buffs: can't tell which is ours
-			found = tex
+		local t = bi and GetPlayerBuffTexture(bi)
+		if t and not before[string.lower(t)] then
+			if tex then return nil end   -- two new buffs: can't tell which is ours
+			tex, index = t, bi
 		end
 	end
-	if not found then return nil end
-	QM.setItemMatch(id, "icon", found)
-	return found
+	if not tex then return nil end
+	local spellId = QM.itemMatchAvailable("id") and QM.playerBuffSpellId(index)
+	if spellId and QM.setItemMatch(id, "id", spellId) then return { by = "id", value = spellId } end
+	if QM.setItemMatch(id, "icon", tex) then return { by = "icon", value = tex } end
+	return nil
 end
 
 -- Every HELPFUL buff on the player: { { index, icon, name, id }, ... }. Backs /qm buffs.

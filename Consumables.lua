@@ -113,6 +113,8 @@ local DEFAULT_EAT_TIME = 10
 local EAT_AURA_GRACE   = 1.5   -- secs before a missing eat aura counts as "stopped" (it needs a beat to appear)
 local EAT_TIMEOUT      = 8     -- secs past the expected eat time with no buff -> give up
 local EAT_FLASH        = 0.9   -- with no learned eat aura, how long the click-feedback blue flash shows
+local EAT_AURA_CAPTURE = 2.5   -- secs after the click within which the eating aura must appear;
+                               -- past it, a new buff is Well Fed landing, not the aura
 
 local eatSession   -- { id, start, pre = {iconSet}, candidate = icon } or nil
 
@@ -155,7 +157,7 @@ local function updateEatSession()
 		sess.learned = true
 	end
 
-	if not sess.candidate then
+	if not sess.candidate and elapsed <= EAT_AURA_CAPTURE then
 		local set = helpfulBuffIcons()
 		for icon in pairs(set) do
 			if not sess.pre[icon] then sess.candidate = icon; break end
@@ -179,6 +181,11 @@ local function weaponApplySlot(itemID, apply)
 	if GetInventoryItemLink("player", 17) and not QM.itemEffect(itemID, C.APPLY_OH) then return 17 end
 	return 16
 end
+
+-- How long after a use a new buff may still be claimed as that item's effect (see the
+-- capture-on-use block at the end of C.use). Sub-second on purpose; PLAYER_AURAS_CHANGED,
+-- not the 0.5s TICK, is what resolves it, so the buff is read the instant it lands.
+local LEARN_WINDOW = 1
 
 -- Consume one of itemID straight from the carried bags, no bag UI. Apply modes:
 --   target -- cast on a unit, so to land it on the player we briefly target self, use, then
@@ -224,15 +231,17 @@ function C.use(itemID, apply)
 	end
 	-- Capture-on-use. Almost every seed entry carries no explicit match rule and leans on the
 	-- derived "the buff icon equals the item icon" default, which is simply false for scrolls,
-	-- food, jujus and anything whose buff art differs from its item art -- those rows would
-	-- never light up, with nothing in the addon to correct them. Watch for the new buff
-	-- instead. Food only lands Well Fed after the eat session, hence the longer window.
+	-- jujus and anything whose buff art differs from its item art -- those rows would never
+	-- light up, with nothing in the addon to correct them. Watch for the new buff instead.
+	-- The window is deliberately TINY: the only evidence here is "a buff appeared", and in a
+	-- raid buffs land constantly, so every extra second is another chance to adopt someone
+	-- else's. That also rules food out -- its Well Fed lands ten-odd seconds later, far past
+	-- any window that could tell it apart from the raid's traffic, so food carries no
+	-- auto-learn at all and is configured from the gear popup instead.
 	local track = QM.itemTrack(itemID)
 	if apply ~= C.APPLY_WEAPON and apply ~= C.APPLY_MH and apply ~= C.APPLY_OH
-	   and (track == QM.TRACK_BUFF or track == QM.TRACK_FOOD)
-	   and not QM.itemValidated(itemID) then
-		C.pendingBuffLearn = { id = itemID, before = beforeBuffs,
-			deadline = GetTime() + (track == QM.TRACK_FOOD and 45 or 12) }
+	   and track == QM.TRACK_BUFF and not QM.itemValidated(itemID) then
+		C.pendingBuffLearn = { id = itemID, before = beforeBuffs, deadline = GetTime() + LEARN_WINDOW }
 	end
 	if track == QM.TRACK_FOOD then startEatSession(itemID) end
 	C.kickFast(1)   -- animate the resulting (short) cooldown smoothly from the click
@@ -1530,18 +1539,25 @@ QM.subscribe("TICK", function()
 	renderHUD(data)
 end)
 
--- Process a pending capture-on-use (see C.use): adopt whichever buff appeared since the item
--- was used, retrying each tick until one lands or the window closes. Clears early once the rule
--- validates -- validateTick confirms it on the very next pass, the buff being up by then.
-QM.subscribe("TICK", function()
+-- Resolve a pending capture-on-use (see C.use): adopt the one buff that appeared since the
+-- item was used. Driven by PLAYER_AURAS_CHANGED so the buff is claimed the moment it lands --
+-- with a window this short, waiting up to 0.5s for the next TICK would spend most of it -- and
+-- by TICK only to close the window. What was learned is announced, since a guess made off one
+-- observation can be wrong and the notice is what sends the user to the gear popup to reset it.
+local function tryBuffLearn()
 	local p = C.pendingBuffLearn
 	if not p then return end
 	if QM.itemValidated(p.id) or GetTime() > p.deadline then C.pendingBuffLearn = nil; return end
-	if QM.learnSelfBuff(p.id, p.before) then
-		C.pendingBuffLearn = nil
-		QM.fire("ITEM_META_CHANGED")
-	end
-end)
+	local m = QM.learnSelfBuff(p.id, p.before)
+	if not m then return end
+	C.pendingBuffLearn = nil
+	QM.notify(QM.Notify.label("Learned ") .. whiteName({ id = p.id, name = GetItemInfo("item:" .. p.id) })
+		.. QM.Notify.label(" = " .. QM.describeMatch(m)),
+		{ category = "learnedEffect", severity = "info" })
+	QM.fire("ITEM_META_CHANGED")
+end
+QM.subscribe("TICK", tryBuffLearn)
+QM.on("PLAYER_AURAS_CHANGED", tryBuffLearn)
 
 -- Process a pending capture-on-apply (see C.use): once the enchant we just applied has landed
 -- on its slot, learn its identity for the item. Retries until it lands, then gives up after the
@@ -1830,6 +1846,8 @@ QM.registerConfigTab({
 				lost:ClearAllPoints(); lost:SetPoint("LEFT", expiring.label, "RIGHT", 16, 0)
 				local lowStock = notifyCheck("Low consumable stock", "lowConsumable")
 				lowStock:ClearAllPoints(); lowStock:SetPoint("LEFT", lost.label, "RIGHT", 16, 0)
+				local learned = notifyCheck("Effect learned from a use", "learnedEffect")
+				learned:ClearAllPoints(); learned:SetPoint("LEFT", lowStock.label, "RIGHT", 16, 0)
 				return expiring   -- bottom-most control; the add row stacks below it
 			end,
 			-- Tracker row order (presentation only), placed inline with "+ Separator" to save

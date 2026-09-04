@@ -85,8 +85,16 @@ Quartermaster` at the top of each file.
   "never up"). An effect's identity is **learned on use** in both directions: `C.use`
   snapshots the slot's pre-apply enchant so `QM.learnWeaponEnchant` commits the new one only
   once it differs (avoiding a stale-id window right after replace), and snapshots the buffs
-  already up so `QM.learnSelfBuff` can adopt the one that appears. Both decline to learn
-  when the answer is ambiguous — a wrong rule is worse than none. This matters because
+  already up so `QM.learnSelfBuff` can adopt the one that appears — as a **spell-id** rule
+  wherever the client can read one, since an icon is not an identity (every food's Well Fed
+  shares one, so an icon rule lights up every row that shares it). Both decline to learn
+  when the answer is ambiguous — a wrong rule is worse than none. The self-buff window is
+  **sub-second** (`LEARN_WINDOW`, resolved on `PLAYER_AURAS_CHANGED` rather than the 0.5s
+  TICK) because the only evidence is "a buff appeared" and a raid supplies those constantly;
+  that also rules **food** out of auto-learning entirely — Well Fed lands ten-odd seconds
+  later — so a food's rule is set by hand in the gear popup. Whatever is learned raises a
+  `learnedEffect` notification naming the item and the rule, since a guess made off one
+  observation needs to be visible to be corrected. This matters because
   almost every `SEED` entry carries no explicit `match` and leans on the derived
   "buff icon == item icon" default, which is simply false for scrolls, food and jujus.
   **Every buff scan sweeps slots 0..31 and skips empties** — an empty slot is a gap, not the
@@ -308,7 +316,7 @@ QuartermasterDB = {
                            mailTrackedOverage },     -- Dump Excess also mails tracked overage
               notify = { enabled, duration, fontSize,
                          lowRepair, lowConsumable,   -- per-category gates
-                         consumableExpiring, consumableLost } },
+                         consumableExpiring, consumableLost, learnedEffect } },
   frames  = { main   = { point, x, y, scale, width },
               notify = { point, x, y, scale, width } },
                         -- no entry for Quartermaster_Mail -- it anchors live to Blizzard's

@@ -117,6 +117,8 @@ local defaults = {
 			lowConsumable      = true, -- a tracked consumable below its target
 			consumableExpiring = true, -- an active consumable buff running low
 			consumableLost     = true, -- an active consumable buff dropped
+			learnedEffect      = true, -- capture-on-use adopted a rule for an item (say WHAT, so a
+			                           -- wrong guess is visible immediately rather than silently kept)
 		},
 	},
 	frames = {
