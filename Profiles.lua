@@ -11,6 +11,19 @@ local QM = Quartermaster
 -- every existing list setter/reader works on the active profile untouched. Each
 -- mutating op ends with the alias valid and one DESIRED_CHANGED fire.
 
+-- Two or more profiles to switch between, without building profileNames' list (the HUD
+-- asks on every paint).
+function QM.hasProfileChoice()
+	local n = 0
+	if QM.me and QM.me.profiles then
+		for _ in pairs(QM.me.profiles) do
+			n = n + 1
+			if n >= 2 then return true end
+		end
+	end
+	return false
+end
+
 function QM.profileNames()
 	local names = {}
 	if QM.me and QM.me.profiles then

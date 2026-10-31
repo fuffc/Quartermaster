@@ -432,6 +432,8 @@ end
 --             a weapon enchant -- so neither is honoured here even if stored.
 --   self/target -- the explicit override/seed match, else a derived buff-icon default (the buff
 --             icon equals the item icon for most elixirs/flasks/potions).
+-- The returned rule is shared: read it, never modify it.
+local derivedIconMatch = {}   -- id -> the derived { by="icon" } rule, kept while its icon holds
 function QM.itemMatchEffective(id, apply)
 	local match = metaField(id, "match")
 	if isWeaponApply(apply) then
@@ -453,7 +455,14 @@ function QM.itemMatchEffective(id, apply)
 			local _, _, _, _, _, _, _, _, tex = GetItemInfo("item:" .. id)   -- texture is the 9th return
 			icon = tex
 		end
-		if icon then return { by = "icon", value = icon } end
+		if icon then
+			local m = derivedIconMatch[id]
+			if not m or m.value ~= icon then
+				m = { by = "icon", value = icon }
+				derivedIconMatch[id] = m
+			end
+			return m
+		end
 	end
 	return nil
 end
@@ -824,26 +833,22 @@ end
 -- it needs no arming and only scans items still pending, so it idles cheaply once the
 -- common (icon-equals-item-icon) cases have self-confirmed.
 local function validateTick()
-	local me = QM.me
-	if not me then return end
+	local list = QM.me and QM.me.consumables
+	if not list then return end
 	local changed = false
-	local function scan(list)
-		if not list then return end
-		for i = 1, table.getn(list) do
-			local e = list[i]
-			local tr = e and e.id and QM.itemTrack(e.id)
-			local apply = e and (e.apply or "self")
-			if e and e.id and QM.itemActive(e)
-			   and (tr == QM.TRACK_BUFF or tr == QM.TRACK_FOOD)
-			   and not QM.itemValidated(e.id)
-			   and QM.itemMatchEffective(e.id, apply)
-			   and QM.itemEffect(e.id, apply) then
-				local rec = overrideRecord(e.id)
-				if rec then rec.validated = true; changed = true end
-			end
+	for i = 1, table.getn(list) do
+		local e = list[i]
+		local tr = e and e.id and QM.itemTrack(e.id)
+		local apply = e and (e.apply or "self")
+		if e and e.id and QM.itemActive(e)
+		   and (tr == QM.TRACK_BUFF or tr == QM.TRACK_FOOD)
+		   and not QM.itemValidated(e.id)
+		   and QM.itemMatchEffective(e.id, apply)
+		   and QM.itemEffect(e.id, apply) then
+			local rec = overrideRecord(e.id)
+			if rec then rec.validated = true; changed = true end
 		end
 	end
-	scan(me.consumables)
 	if changed then QM.fire("ITEM_META_CHANGED") end
 end
 

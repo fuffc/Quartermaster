@@ -611,14 +611,24 @@ local function acquireDesc()
 	return d
 end
 
-local function pushItem(out, e, apply, tag)
+-- The row stream itself is one array refilled every paint, for the same reason and under
+-- the same rule as the descriptors: filled by index and cut back with nils, never through
+-- table.insert, so table.getn keeps counting it right.
+local rowStream, nRowStream = {}, 0
+
+local function pushRow(d)
+	nRowStream = nRowStream + 1
+	rowStream[nRowStream] = d
+end
+
+local function pushItem(e, apply, tag)
 	local d = acquireDesc()
 	local s
 	if nStatusFree > 0 then s = statusFree[nStatusFree]; statusFree[nStatusFree] = nil; nStatusFree = nStatusFree - 1
 	else s = {} end
 	d.entry, d.apply, d.tag, d.status = e, apply, tag, s
 	C.liveStatus(e, apply, s)
-	table.insert(out, d)
+	pushRow(d)
 end
 
 -- The HUD row stream, in list order: item elements { entry=, status=, apply=, tag= } for
@@ -629,13 +639,14 @@ end
 -- Weapon hands while dual-wielding split a buff/food weapon-enchant entry into MH + OH rows
 -- with a tag; single-weapon or non-enchant items stay one row. Unordered within segments;
 -- C.orderTracked applies the row order and empty headers are pruned at render.
+-- The returned array is reused by the next call: read it within the same paint.
 function C.activeBuffs()
 	reclaimDescs()
-	local out = {}
+	for i = nRowStream, 1, -1 do rowStream[i] = nil end
+	nRowStream = 0
 	local list = QM.me and QM.me.consumables
-	if not list then return out end
+	if not list then return rowStream end
 	local dw = offHandIsWeapon()
-	local function push(e, apply, tag) pushItem(out, e, apply, tag) end
 	for i = 1, table.getn(list) do
 		local e = list[i]
 		if QM.isDivider(e) then
@@ -643,7 +654,7 @@ function C.activeBuffs()
 			if st ~= "off" then
 				local d = acquireDesc()
 				d.divider, d.wall, d.header, d.label, d.entry = true, true, (st == "enabled"), e.label, e
-				table.insert(out, d)
+				pushRow(d)
 			end
 		elseif e and e.id and QM.itemShown(e) then
 			local tr = QM.itemTrack(e.id)
@@ -652,14 +663,14 @@ function C.activeBuffs()
 			local enchant = (tr == QM.TRACK_BUFF or tr == QM.TRACK_FOOD)
 				and (apply == C.APPLY_WEAPON or apply == C.APPLY_MH or apply == C.APPLY_OH)
 			if enchant and apply == C.APPLY_WEAPON then
-				if dw then push(e, C.APPLY_MH, "MH"); push(e, C.APPLY_OH, "OH")
-				else push(e, C.APPLY_WEAPON, nil) end
-			elseif enchant and apply == C.APPLY_MH then push(e, C.APPLY_MH, dw and "MH" or nil)
-			elseif enchant and apply == C.APPLY_OH then push(e, C.APPLY_OH, dw and "OH" or nil)
-			else push(e, apply, nil) end
+				if dw then pushItem(e, C.APPLY_MH, "MH"); pushItem(e, C.APPLY_OH, "OH")
+				else pushItem(e, C.APPLY_WEAPON, nil) end
+			elseif enchant and apply == C.APPLY_MH then pushItem(e, C.APPLY_MH, dw and "MH" or nil)
+			elseif enchant and apply == C.APPLY_OH then pushItem(e, C.APPLY_OH, dw and "OH" or nil)
+			else pushItem(e, apply, nil) end
 		end
 	end
-	return out
+	return rowStream
 end
 
 -- Apply the configured row order (QM.db.options.rowOrder), independently WITHIN each
@@ -667,59 +678,78 @@ end
 --   config   -- list order (as added).
 --   active   -- buff-up rows first (list order within the segment), then the rest.
 --   duration -- buff-up rows by time left (most first, least at the bottom), then the rest.
+-- Returns an array the next call reuses, as activeBuffs does. The scratch arrays are left
+-- empty after every segment, so table.sort (which counts with table.getn) sees only live rows.
 local function isUp(d) return d.status.phase == "buff" end
 local function byTimeLeftDesc(a, b)
 	return (a.status.timeLeft or 1e9) > (b.status.timeLeft or 1e9)
 end
+local ordered, nOrdered = {}, 0
+local segBuf, upBuf, restBuf = {}, {}, {}
+
+local function appendOrdered(d)
+	nOrdered = nOrdered + 1
+	ordered[nOrdered] = d
+end
+
+local function flushSegment(mode, nSeg)
+	if mode == "config" then
+		for i = 1, nSeg do appendOrdered(segBuf[i]); segBuf[i] = nil end
+		return
+	end
+	local nUp, nRest = 0, 0
+	for i = 1, nSeg do
+		local d = segBuf[i]
+		segBuf[i] = nil
+		if isUp(d) then nUp = nUp + 1; upBuf[nUp] = d else nRest = nRest + 1; restBuf[nRest] = d end
+	end
+	if mode == "duration" and nUp > 1 then table.sort(upBuf, byTimeLeftDesc) end
+	for i = 1, nUp do appendOrdered(upBuf[i]); upBuf[i] = nil end
+	for i = 1, nRest do appendOrdered(restBuf[i]); restBuf[i] = nil end
+end
+
 function C.orderTracked(data)
 	local mode = (QM.db and QM.db.options.rowOrder) or "config"
-	local out, seg = {}, {}
-	local function flush()
-		if table.getn(seg) == 0 then return end
-		if mode ~= "config" then
-			local up, rest = {}, {}
-			for i = 1, table.getn(seg) do
-				if isUp(seg[i]) then table.insert(up, seg[i]) else table.insert(rest, seg[i]) end
-			end
-			if mode == "duration" then
-				table.sort(up, byTimeLeftDesc)
-			end
-			local merged = {}
-			for i = 1, table.getn(up)   do table.insert(merged, up[i])   end
-			for i = 1, table.getn(rest) do table.insert(merged, rest[i]) end
-			seg = merged
-		end
-		for i = 1, table.getn(seg) do table.insert(out, seg[i]) end
-		seg = {}
-	end
+	for i = nOrdered, 1, -1 do ordered[i] = nil end
+	nOrdered = 0
+	local nSeg = 0
 	for i = 1, table.getn(data) do
 		local d = data[i]
-		if d.divider then flush(); table.insert(out, d)
-		else table.insert(seg, d) end
+		if d.divider then
+			flushSegment(mode, nSeg)
+			nSeg = 0
+			appendOrdered(d)
+		else
+			nSeg = nSeg + 1
+			segBuf[nSeg] = d
+		end
 	end
-	flush()
-	return out
+	flushSegment(mode, nSeg)
+	return ordered
 end
 
 -- Drop what shouldn't be drawn once the order is fixed: hidden-wall dividers (header=false,
 -- they only served as ordering boundaries) and any enabled header whose segment has no item
 -- rows (items are contiguous within a segment, so the header's segment is empty exactly when
--- the next element is another divider or the end).
+-- the next element is another divider or the end). Reuses one array, like orderTracked.
+local visible, nVisible = {}, 0
 local function visibleRows(data)
-	local out = {}
+	for i = nVisible, 1, -1 do visible[i] = nil end
+	nVisible = 0
 	local n = table.getn(data)
 	for i = 1, n do
 		local d = data[i]
-		if d.divider then
-			if d.header then
-				local nxt = data[i + 1]
-				if nxt and not nxt.divider then table.insert(out, d) end
-			end
-		else
-			table.insert(out, d)
+		local keep = not d.divider
+		if d.divider and d.header then
+			local nxt = data[i + 1]
+			keep = nxt and not nxt.divider
+		end
+		if keep then
+			nVisible = nVisible + 1
+			visible[nVisible] = d
 		end
 	end
-	return out
+	return visible
 end
 
 -- ---------------------------------------------------------------------------
@@ -1358,7 +1388,7 @@ local function renderHUD(data)
 
 	-- The profile-switch row is opt-in and only ever meaningful with 2+ profiles to
 	-- pick between; "top"/"bottom" (default top) picks which end of the HUD it pins to.
-	local wantProfileRow = QM.db.options.hudProfileSwitch and table.getn(QM.profileNames()) >= 2
+	local wantProfileRow = QM.db.options.hudProfileSwitch and QM.hasProfileChoice()
 	local profileAtTop    = wantProfileRow and (QM.db.options.hudProfileSwitchPos ~= "bottom")
 	local profileAtBottom = wantProfileRow and not profileAtTop
 
