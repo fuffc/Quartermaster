@@ -1639,7 +1639,9 @@ QM.subscribe("DB_READY", function()
 		hudFastAccum = hudFastAccum + arg1
 		if hudFastAccum < FAST_INTERVAL then return end
 		hudFastAccum = 0
+		QM.profBegin("hud fast repaint")
 		renderHUD()
+		QM.profEnd("hud fast repaint")
 	end)
 
 	QM.applyFrameLock(f)

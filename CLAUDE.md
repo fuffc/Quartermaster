@@ -54,6 +54,17 @@ Quartermaster` at the top of each file.
   `setTarget`), the **event hub** (`QM.on`), **internal signals** (`QM.subscribe`/
   `QM.fire`), the OnUpdate driver, and the slash command. Creates the engine frame at
   load, so `QM.on` works the instant any later file calls it.
+- [Profiling.lua](Profiling.lua) — the opt-in **profiler** behind `/qm prof`. While
+  started it swaps Core's event dispatcher (`engine`'s OnEvent) and `QM.fire` for copies
+  that time each handler, wraps `QM.scanInventory`, and samples `gcinfo()` once a frame;
+  stop restores the originals, so it costs nothing while stopped. Per site it records
+  wall time (`debugprofilestop`, `GetTime` fallback) and KB allocated (the heap's growth
+  in `gcinfo`'s whole-KB steps, accurate summed over many calls); per session the
+  client's churn, the share of it inside Quartermaster's sites, and each garbage
+  collection with its frame length. Keys name where a handler was registered
+  (`QM.on`/`QM.subscribe` are wrapped at load to read `debugstack`), which is why it
+  loads right after Core. `QM.profBegin(key)`/`QM.profEnd(key)` mark a site outside
+  the hub (the HUD's fast-repaint OnUpdate); each is one flag test while stopped.
 - [Profiles.lua](Profiles.lua) — named per-character **profiles** of the Tracker list
   (switch/create/rename/delete/export/import). Invariant: `me.consumables` IS
   `profiles[activeProfile]` (the same table) — switching just re-points that alias and
@@ -237,7 +248,8 @@ Quartermaster` at the top of each file.
 - [pack.ps1](pack.ps1) — builds `Quartermaster.zip`. Its file list comes from the `.toc`
   so it can't drift, plus `Bindings.xml` named outright since that isn't listed there.
 
-**Load order** (`.toc`): Core, Profiles, then feature modules, then Config, then the XML.
+**Load order** (`.toc`): Core, Profiling, Profiles, then feature modules, then Config,
+then the XML.
 Modules register events/signals/config-tabs at load; Core dispatches.
 
 ### Engine, events, signals
@@ -385,7 +397,9 @@ match rule and a live verdict (the diagnostic for "the buff is up, why is the ro
 `/qm mailsync dump` / `/qm mailsync
 <character> [list]` run the Transfer mail sync (list defaults to that character's
 `activeProfile`; both need the mail window open, and mail enabled); `/qm mailtest <recipient>
-[delaySeconds]` is a debug probe for the SendMail-no-reply failure. Character/profile
+[delaySeconds]` is a debug probe for the SendMail-no-reply failure; `/qm prof start |
+stop | report [n] [kb] | reset` drives the profiler ([Profiling.lua](Profiling.lua)).
+Character/profile
 names are case-sensitive, so the handler preserves the slash text's original case for
 `mailsync`'s arguments. Everything else lives in the panel/mail panel — no full slash
 parity.

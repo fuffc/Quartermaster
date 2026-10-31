@@ -115,6 +115,7 @@ config panel.
 | `/qm prep` | Print the active list's shortfall to chat — what's short vs. Target, and how much of that is sitting in your bank or on other characters. Same report as the Tracker tab's **Prep** button. |
 | `/qm mailsync dump` | Mail every Transfer-list item's excess above its Keep floor to its recipient (plus tracked-list overage to your default recipient, if set). Requires the mailbox open and **Enable mail features** ticked (off by default). |
 | `/qm mailsync <character> [list]` | Mail *this* character's covering stock to help another character's shortfall on the given list (defaults to that character's active profile). Requires the mailbox open and **Enable mail features** ticked. |
+| `/qm prof start` / `stop` / `report [n] [kb]` / `reset` | Profiler, off until started. `report` lists the costliest event handlers, signal subscribers and HUD repaints by time (or by memory allocated, with `kb`), the share of the whole client's memory churn Quartermaster accounts for, and any garbage collections seen with how long their frame took. |
 
 ## The config panel
 

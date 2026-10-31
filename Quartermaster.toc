@@ -6,6 +6,7 @@
 ## SavedVariables: QuartermasterDB
 
 Core.lua
+Profiling.lua
 Profiles.lua
 ItemDB.lua
 ItemMeta.lua
